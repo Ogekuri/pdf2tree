@@ -245,3 +245,7 @@ __marimo__/
 
 # Temp dir for tests
 temp/
+
+# Gemini API Key
+.gemini-api-key
+

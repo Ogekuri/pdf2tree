@@ -17,9 +17,9 @@ tags: ["markdown", "requirements", "example"]
 ---
 
 # Requisiti pdf2tree
-**Versione**: 0.1
+**Versione**: 0.3
 **Autore**: Codex  
-**Data**: 2026-01-02
+**Data**: 2026-01-04
 
 ## Indice
 <!-- TOC -->
@@ -43,6 +43,8 @@ tags: ["markdown", "requirements", "example"]
 | Data | Versione | Motivo e descrizione della modifica |
 |------|----------|-------------------------------------|
 | 2026-01-02 | 0.1 | Bozza iniziale basata sul sorgente |
+| 2026-01-03 | 0.2 | Aggiunta funzionalità di annotazione immagini con Gemini |
+| 2026-01-04 | 0.3 | Aggiunta requisiti per rilevare formule matematiche e includerle come immagini e LaTeX annotato |
 
 ## 1. Introduzione
 Questo documento definisce i requisiti del progetto pdf2tree, un tool CLI che converte file PDF in una struttura di cartelle con contenuto Markdown e asset estratti.
@@ -71,12 +73,14 @@ Il progetto converte un PDF in una gerarchia di cartelle e file Markdown basata 
 - **CORE-PRJ-003**: Il progetto deve supportare l'estrazione opzionale di diagrammi vettoriali dal PDF.
 - **CORE-PRJ-004**: Il progetto deve offrire un'interfaccia CLI per l'esecuzione locale e la gestione delle opzioni di conversione.
 - **CORE-PRJ-005**: Il progetto deve generare un file `project_manifest.json` che riassuma i capitoli convertiti.
+- **CORE-PRJ-006**: Il progetto deve poter arricchire i file Markdown generati con descrizioni testuali delle immagini estratte (raster e vettoriali) tramite modello multimodale Gemini.
 
 ### 2.2 Vincoli di progetto
 - **CORE-CTN-001**: Il progetto deve essere eseguibile con Python >= 3.11.
 - **CORE-CTN-002**: Il progetto deve dipendere da PyMuPDF con versione minima 1.26.6.
 - **CORE-CTN-003**: Il progetto deve richiedere una directory di output non esistente o gestita in modalita' ripresa.
 - **CORE-CTN-004**: Il progetto deve limitare l'estrazione testo ignorando intestazioni e pie' di pagina tramite margini configurati.
+- **CORE-CTN-005**: L'annotazione delle immagini deve richiedere la variabile d'ambiente `GEMINI_API_KEY`; se assente, l'esecuzione con annotazione deve fallire con messaggio chiaro.
 
 ### 2.3 Componenti, librerie e struttura
 
@@ -139,6 +143,9 @@ Componenti e librerie utilizzati:
 - **CORE-DES-004**: Il sistema deve salvare lo stato di avanzamento in un file `progress_state.json` usando una scrittura atomica.
 - **CORE-DES-005**: L'estrazione di diagrammi vettoriali deve applicare filtri su dimensioni, posizione e densita' dei tracciati prima del clustering.
 - **CORE-DES-006**: Il contenuto Markdown dei capitoli deve includere frontmatter con `title` e `context`.
+- **CORE-DES-007**: Con annotazione attiva, la CLI deve usare un modello Gemini vision configurato via flag dedicato e inserire nel Markdown, accanto a ogni link immagine, una descrizione dettagliata generata dal modello.
+- **CORE-DES-008**: La rilevazione delle formule matematiche deve analizzare testo e struttura della pagina PDF (blocchi/span PyMuPDF) con euristiche sui simboli matematici, ritagliando ogni formula in un'immagine PNG con minimo padding e salvandola nella cartella `assets` del capitolo.
+- **CORE-DES-009**: Se l'opzione `--annotate-images` e' attiva, ogni immagine di formula deve essere inviata a Gemini con un prompt che richiede la rappresentazione LaTeX; il risultato deve essere inserito nel Markdown subito dopo il link dell'immagine usando la sintassi math Markdown (`$...$` o `$$...$$`).
 
 ### 3.2 Funzioni
 - **CORE-REQ-001**: Il tool deve terminare con errore se il file PDF di input non esiste.
@@ -151,6 +158,8 @@ Componenti e librerie utilizzati:
 - **CORE-REQ-008**: Il tool deve permettere l'interruzione soft tramite segnale `SIGINT` salvando lo stato di avanzamento.
 - **CORE-REQ-009**: Il tool deve supportare messaggi di debug con l'opzione `--debug`.
 - **CORE-REQ-010**: Il tool deve supportare messaggi di dettaglio con l'opzione `--verbose`.
+- **CORE-REQ-011**: Con l'opzione di annotazione attiva, il tool deve inviare ogni immagine estratta (incluse quelle vettoriali) al modello Gemini e inserire nel `content.md` la descrizione generata accanto al link dell'immagine.
+- **CORE-REQ-012**: Il tool deve identificare le formule matematiche presenti nel PDF e sostituirle nel `content.md` con link a immagini PNG delle formule salvate nella cartella `assets`, mantenendo l'ordine originale del testo.
 
 ## 4. Verifica
 Sintesi dei test presenti:

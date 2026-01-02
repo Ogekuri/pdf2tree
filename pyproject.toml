@@ -12,6 +12,7 @@ dependencies = [
   "pymupdf>=1.26.6",
   "pymupdf4llm",
   "pymupdf_layout",
+  "google-generativeai",
 ]
 license = { file = "LICENSE" }
 authors = [

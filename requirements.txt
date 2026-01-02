@@ -2,6 +2,7 @@
 pymupdf>=1.26.6
 pymupdf4llm
 pymupdf_layout
+google-generativeai
 
 # Test / CI dependencies
 pytest

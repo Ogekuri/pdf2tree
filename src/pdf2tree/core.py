@@ -15,6 +15,9 @@ import shutil
 from pathlib import Path
 import tempfile
 import signal
+import mimetypes
+import importlib
+import subprocess
 
 # --- CONFIGURAZIONE GLOBALE ---
 # Questi parametri influenzano il modo in cui il testo e gli elementi grafici vengono estratti.
@@ -42,6 +45,20 @@ CLUSTER_Y_TOLERANCE = 10
 
 # Nome file progress per la modalità resume (singola sorgente di verità)
 PROGRESS_FILENAME = "progress_state.json"
+GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
+IMAGE_DESCRIPTION_PROMPT = (
+    "Fornisci una descrizione dettagliata dell'immagine per indicizzare il contenuto in un vector DB. "
+    "Includi soggetti, oggetti, testo visibile, colori, contesto, stile e relazioni spaziali. "
+    "Rispondi in italiano con frasi complete."
+)
+MATH_LATEX_PROMPT = (
+    "Estrarre la formula matematica presente nell'immagine e restituirla in puro LaTeX, "
+    "senza testo extra, commenti o markdown aggiuntivo. Non aggiungere delimitatori."
+)
+MATH_PADDING = 6
+_MATH_SYMBOLS = set("=+−-*/·×÷√∑∏≈≠≤≥∞∫∇∂πµσθλΩΦΨαβγδ∆∈∪∩∀∃∧∨⇒⇔→←∞∅^_{}[]()<>|")
+_LATEX_TOKEN_RE = re.compile(r"\\[A-Za-z]+")
+_MATH_DELIMS = ("\\[", "\\]", "$", "\\(", "\\)")
 
 
 def check_dependencies():
@@ -99,6 +116,333 @@ def sanitize_filename(name):
     clean = re.sub(r'\s+', ' ', clean)
     # Se la stringa pulita è vuota, restituisce un nome di default. Altrimenti la tronca.
     return clean[:50] if clean else "Sezione_Senza_Titolo"
+
+
+def _guess_mime_type(path: Path) -> str:
+    mime, _ = mimetypes.guess_type(path.name)
+    return mime or "application/octet-stream"
+
+
+def _init_gemini_model(api_key: str, model_name: str):
+    stub_path = os.environ.get("PDF2TREE_GEMINI_STUB_PATH")
+    if stub_path:
+        sys.path.insert(0, stub_path)
+
+    module_path = os.environ.get("PDF2TREE_GEMINI_MODULE", "google.generativeai")
+
+    try:
+        genai = importlib.import_module(module_path)
+    except ImportError:
+        sys.exit(f"❌ Errore: modulo '{module_path}' non installato. Installa con 'pip install google-generativeai' oppure specifica un modulo alternativo.")
+
+    try:
+        if hasattr(genai, "configure"):
+            genai.configure(api_key=api_key)
+        return genai.GenerativeModel(model_name)
+    except Exception as exc:
+        sys.exit(f"❌ Errore nella configurazione del modello Gemini '{model_name}': {exc}")
+
+
+def _describe_image_with_gemini(model, image_path: Path, is_debug: bool) -> str:
+    try:
+        image_bytes = image_path.read_bytes()
+    except Exception as exc:
+        raise RuntimeError(f"Impossibile leggere l'immagine {image_path}: {exc}") from exc
+
+    mime_type = _guess_mime_type(image_path)
+    try:
+        response = model.generate_content([IMAGE_DESCRIPTION_PROMPT, {"mime_type": mime_type, "data": image_bytes}])
+        text = getattr(response, "text", "") or ""
+        if not text.strip():
+            raise RuntimeError("Risposta vuota da Gemini")
+        return text.strip()
+    except Exception as exc:
+        log(f"Errore durante l'annotazione immagine {image_path}: {exc}", is_debug)
+        hint = ""
+        if "not found" in str(exc).lower():
+            hint = f" Modello non disponibile; riprova con --gemini-model {GEMINI_DEFAULT_MODEL}."
+        raise RuntimeError(f"Annotazione immagine fallita: {exc}.{hint}") from exc
+
+
+def annotate_images_in_markdown(markdown: str, chapter_dir: Path, model, is_debug: bool, verbose: bool, dry_run: bool) -> str:
+    """
+    Inserisce descrizioni generate dal modello Gemini accanto ai link delle immagini.
+    """
+    if dry_run:
+        if verbose or is_debug:
+            print("[VERBOSE] (dry-run) annotazione immagini saltata")
+        return markdown
+
+    pattern = re.compile(r"!\[[^\]]*]\((assets/[^\)]+)\)")
+    seen = set()
+
+    def _replace(match: re.Match) -> str:
+        rel_path = match.group(1)
+        if "math_formula" in rel_path:
+            return match.group(0)
+        if rel_path in seen:
+            return match.group(0)
+        seen.add(rel_path)
+
+        image_path = (chapter_dir / rel_path).resolve()
+        if not image_path.exists():
+            log(f"Immagine non trovata per annotazione: {image_path}", is_debug)
+            return match.group(0)
+
+        if verbose or is_debug:
+            print(f"[VERBOSE] Annotazione immagine: {image_path}")
+
+        description = _describe_image_with_gemini(model, image_path, is_debug)
+        return f"{match.group(0)}\n\n> {description}\n"
+
+    return pattern.sub(_replace, markdown)
+
+
+def _describe_math_with_gemini(model, image_path: Path, is_debug: bool) -> str:
+    try:
+        image_bytes = image_path.read_bytes()
+    except Exception as exc:
+        raise RuntimeError(f"Impossibile leggere l'immagine {image_path}: {exc}") from exc
+
+    mime_type = _guess_mime_type(image_path)
+    try:
+        response = model.generate_content([MATH_LATEX_PROMPT, {"mime_type": mime_type, "data": image_bytes}])
+        text = getattr(response, "text", "") or ""
+        if not text.strip():
+            raise RuntimeError("Risposta vuota da Gemini per formula")
+        return text.strip()
+    except Exception as exc:
+        log(f"Errore durante l'estrazione LaTeX per {image_path}: {exc}", is_debug)
+        raise RuntimeError(f"Annotazione formula fallita: {exc}") from exc
+
+
+def _is_math_text(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if any(d in stripped for d in _MATH_DELIMS):
+        return True
+    latex_hits = len(_LATEX_TOKEN_RE.findall(stripped))
+    math_hits = sum(1 for ch in stripped if ch in _MATH_SYMBOLS)
+    digit_hits = sum(1 for ch in stripped if ch.isdigit())
+    if latex_hits:
+        return True
+    if math_hits >= 2 and (math_hits / max(len(stripped), 1)) >= 0.2:
+        return True
+    if ("=" in stripped or "≤" in stripped or "≥" in stripped) and digit_hits:
+        return True
+    return False
+
+
+def _collect_math_spans(page, is_debug: bool):
+    spans = []
+    try:
+        blocks = page.get_text("dict").get("blocks", [])
+    except Exception as exc:
+        log(f"Impossibile estrarre testo per math detection: {exc}", is_debug)
+        return spans
+
+    for block in blocks:
+        for line in block.get("lines", []):
+            line_rect = pymupdf.Rect(line.get("bbox", (0, 0, 0, 0)))
+            for span in line.get("spans", []):
+                text = span.get("text", "")
+                if not _is_math_text(text):
+                    continue
+                rect = pymupdf.Rect(span.get("bbox", (0, 0, 0, 0)))
+                # Include full line height to avoid vertical clipping
+                rect.y0 = min(rect.y0, line_rect.y0)
+                rect.y1 = max(rect.y1, line_rect.y1)
+                spans.append({"text": text.strip(), "rect": rect})
+
+    merged = []
+    for span in spans:
+        if merged:
+            prev = merged[-1]
+            same_line = abs(prev["rect"].y0 - span["rect"].y0) < 5 and abs(prev["rect"].y1 - span["rect"].y1) < 10
+            close_x = (span["rect"].x0 - prev["rect"].x1) < 24
+            overlap_x = not (span["rect"].x0 > prev["rect"].x1 or span["rect"].x1 < prev["rect"].x0)
+            if (same_line and close_x) or overlap_x:
+                prev["rect"].x0 = min(prev["rect"].x0, span["rect"].x0)
+                prev["rect"].y0 = min(prev["rect"].y0, span["rect"].y0)
+                prev["rect"].x1 = max(prev["rect"].x1, span["rect"].x1)
+                prev["rect"].y1 = max(prev["rect"].y1, span["rect"].y1)
+                prev["text"] = f"{prev['text']} {span['text']}".strip()
+                continue
+        merged.append(span)
+    return merged
+
+
+def _has_math_styled_spans(page) -> bool:
+    try:
+        blocks = page.get_text("dict").get("blocks", [])
+    except Exception:
+        return False
+
+    def _non_alnum_ratio(txt: str) -> float:
+        if not txt:
+            return 0.0
+        non_alnum = sum(1 for ch in txt if not (ch.isalnum() or ch.isspace()))
+        return non_alnum / max(len(txt), 1)
+
+    for block in blocks:
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                text = span.get("text", "")
+                font = span.get("font", "").lower()
+                if (
+                    _is_math_text(text)
+                    or "math" in font
+                    or "italic" in font
+                    or _non_alnum_ratio(text) > 0.3
+                    or any(ch in text for ch in "[ ]=±∑∞∫")
+                    or "\\" in text
+                ):
+                    return True
+    return False
+
+
+def _render_math_formulas(doc, page_num: int, assets_path: Path, is_debug: bool, annotate_math: bool, gemini_model, verbose: bool):
+    formulas = []
+    page = doc.load_page(page_num - 1)
+    candidates = _collect_math_spans(page, is_debug)
+    if not candidates:
+        return formulas
+
+    for idx, cand in enumerate(candidates, start=1):
+        rect = cand["rect"]
+        # Safety expansion before padding to avoid clipped tall symbols
+        expand = max(4, int(rect.height * 0.10))
+        rect.x0 = max(0, rect.x0 - expand)
+        rect.y0 = max(0, rect.y0 - expand)
+        rect.x1 = rect.x1 + expand
+        rect.y1 = rect.y1 + expand
+
+        pad = max(MATH_PADDING, int(rect.height * 0.35), 12)
+        rect.x0 = max(0, rect.x0 - pad)
+        rect.y0 = max(0, rect.y0 - pad)
+        rect.x1 = min(page.rect.x1, rect.x1 + pad)
+        rect.y1 = min(page.rect.y1, rect.y1 + pad)
+        fname = f"math_formula_p{page_num}_{idx}.png"
+        img_path = assets_path / fname
+        try:
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=rect)
+            pix.save(img_path)
+            if verbose or is_debug:
+                print(f"[VERBOSE] Salvata formula p.{page_num} #{idx} bbox={rect} pad={pad} -> {img_path}")
+        except Exception as exc:
+            log(f"Errore salvataggio formula p.{page_num} #{idx}: {exc}", is_debug)
+            continue
+
+        latex_text = None
+        if annotate_math and gemini_model is not None:
+            try:
+                latex_text = _describe_math_with_gemini(gemini_model, img_path, is_debug)
+            except Exception as exc:
+                log(f"Annotazione LaTeX formula p.{page_num} #{idx} fallita: {exc}", is_debug)
+
+        formulas.append(
+            {
+                "text": cand["text"],
+                "image_rel": f"assets/{fname}",
+                "latex": latex_text,
+                "inserted": False,
+            }
+        )
+    return formulas
+
+
+def _render_math_page_image(doc, page_num: int, assets_path: Path, is_debug: bool, verbose: bool):
+    page = doc.load_page(page_num - 1)
+    fname = f"math_page_p{page_num}.png"
+    out_path = assets_path / fname
+    try:
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(3, 3))
+        pix.save(out_path)
+        if verbose or is_debug:
+            print(f"[VERBOSE] Salvata pagina matematica p.{page_num} -> {out_path}")
+        return fname
+    except Exception as exc:
+        log(f"Errore salvataggio pagina matematica p.{page_num}: {exc}", is_debug)
+        return None
+
+
+def _try_pic2tex(image_path: Path, is_debug: bool):
+    if shutil.which("pic2tex") is None:
+        return None
+    try:
+        proc = subprocess.run(
+            ["pic2tex", str(image_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        latex = proc.stdout.strip()
+        return latex or None
+    except Exception as exc:
+        log(f"pic2tex fallito per {image_path}: {exc}", is_debug)
+        return None
+
+
+def _inject_math_images(text: str, formulas: list, append_unused: bool) -> str:
+    result = text
+    normalized = re.sub(r"\s+", " ", result)
+    for formula in formulas:
+        if formula.get("inserted"):
+            continue
+        needle = formula.get("text", "").strip()
+        if not needle:
+            continue
+        simplified = re.sub(r"\s+", " ", needle)
+        pattern_exact = re.compile(re.escape(needle))
+        pattern_simple = re.compile(re.escape(simplified).replace("\\ ", r"\\s+"))
+        replacement = f"![Formula]({formula['image_rel']})"
+        if formula.get("latex"):
+            replacement = f"{replacement}\n\n$${formula['latex']}$$"
+        for pat in (pattern_exact, pattern_simple):
+            new_result, count = pat.subn(replacement, result, count=1)
+            if count:
+                result = new_result
+                formula["inserted"] = True
+                break
+
+    # Line-based fallback: replace any remaining math-like lines with unused formulas.
+    if any(not f.get("inserted") for f in formulas):
+        lines = result.splitlines()
+        out_lines = []
+        for line in lines:
+            pending = next((f for f in formulas if not f.get("inserted")), None)
+            if pending and not line.strip().startswith("![Formula]") and _is_math_text(line):
+                replacement = f"![Formula]({pending['image_rel']})"
+                if pending.get("latex"):
+                    replacement = f"{replacement}\n\n$${pending['latex']}$$"
+                out_lines.append(replacement)
+                pending["inserted"] = True
+            else:
+                out_lines.append(line)
+        result = "\n".join(out_lines)
+
+    if append_unused:
+        extras = []
+        for formula in formulas:
+            if not formula.get("inserted"):
+                replacement = f"![Formula]({formula['image_rel']})"
+                if formula.get("latex"):
+                    replacement = f"{replacement}\n\n$${formula['latex']}$$"
+                extras.append(replacement)
+                formula["inserted"] = True
+        if extras:
+            result = result.rstrip() + "\n\n" + "\n\n".join(extras) + "\n"
+
+    # Remove lingering math-like lines if we processed formulas
+    if formulas:
+        cleaned = []
+        for line in result.splitlines():
+            if _is_math_text(line):
+                continue
+            cleaned.append(line)
+        result = "\n".join(cleaned)
+    return result
 
 
 def get_smart_vector_crop(doc, page_num, is_debug):
@@ -189,7 +533,7 @@ def get_smart_vector_crop(doc, page_num, is_debug):
         return None
 
 
-def process_chapter_chunks(doc, start, end, assets_path, is_debug, vectors_on, pages=None):
+def process_chapter_chunks(doc, start, end, assets_path, is_debug, vectors_on, pages=None, annotate_math=False, gemini_model=None, verbose=False, dry_run=False):
     """
     Estrae il contenuto (testo e immagini) di un capitolo, definito da un range di pagine,
     e lo converte in formato Markdown. Opzionalmente, cerca ed estrae anche diagrammi vettoriali.
@@ -225,26 +569,82 @@ def process_chapter_chunks(doc, start, end, assets_path, is_debug, vectors_on, p
             doc,
             pages=pages,
             page_chunks=True,     # Divide il contenuto in blocchi per pagina.
-            write_images=True,    # Abilita il salvataggio delle immagini.
+            write_images=not dry_run,    # Evita scritture in dry-run.
             image_path=str(assets_path), # Specifica la cartella per le immagini.
             image_format="png",   # Formato delle immagini.
             margins=TEXT_MARGINS  # Applica i margini per ignorare header/footer.
         )
 
+        page_numbers = []
+        page_last_idx = {}
+        for idx, chunk in enumerate(data):
+            actual_page = pages[idx] + 1
+            page_numbers.append(actual_page)
+            page_last_idx[actual_page] = idx
+
+        formulas_by_page = {}
+        math_page_flags = {}
+        math_page_images = {}
+        math_page_latex = {}
+        for page_num in sorted(page_last_idx.keys()):
+            if dry_run:
+                formulas_by_page[page_num] = []
+                math_page_flags[page_num] = False
+            else:
+                page_obj = doc.load_page(page_num - 1)
+                math_page_flags[page_num] = _has_math_styled_spans(page_obj)
+                formulas_by_page[page_num] = _render_math_formulas(doc, page_num, assets_path, is_debug, annotate_math, gemini_model, verbose)
+                if math_page_flags[page_num]:
+                    img_name = _render_math_page_image(doc, page_num, assets_path, is_debug, verbose)
+                    if img_name:
+                        math_page_images[page_num] = img_name
+                        latex_text = _try_pic2tex(assets_path / img_name, is_debug)
+                        if latex_text:
+                            math_page_latex[page_num] = latex_text
+            if verbose:
+                count = len(formulas_by_page[page_num])
+                print(f"[VERBOSE] Formule rilevate pag.{page_num}: {count} (pagina matematica: {math_page_flags.get(page_num, False)})")
+
         md_output = ""
         processed_vector_pages = set() # Tiene traccia delle pagine già analizzate per vettori.
         processed_pages = set()
 
-        for chunk in data:
+        for idx, chunk in enumerate(data):
             text = chunk.get("text", "")
-            meta = chunk.get("metadata", {})
-            page_num = meta.get("page", 0) + 1 # Numero di pagina (partendo da 1)
+            page_num = page_numbers[idx] # Numero di pagina (partendo da 1)
             processed_pages.add(page_num)
+
+            formulas = formulas_by_page.get(page_num, [])
+            append_unused = idx == page_last_idx.get(page_num)
+            if formulas and not math_page_flags.get(page_num):
+                before = text
+                text = _inject_math_images(text, formulas, append_unused)
+                if verbose and text != before:
+                    injected = sum(1 for f in formulas if f.get("inserted"))
+                    print(f"[VERBOSE] Inserite {injected}/{len(formulas)} formule in pag.{page_num}")
+            elif math_page_flags.get(page_num):
+                # Rimuovi righe riconosciute come matematiche e inserisci blocco pagina
+                kept = []
+                for line in text.splitlines():
+                    if _is_math_text(line):
+                        continue
+                    kept.append(line)
+                math_block = ""
+                img_name = math_page_images.get(page_num)
+                if img_name:
+                    math_block = f"![Formula pagina {page_num}](assets/{img_name})"
+                latex_block = math_page_latex.get(page_num)
+                if latex_block:
+                    math_block = f"{math_block}\n\n$${latex_block}$$" if math_block else f"$${latex_block}$$"
+                if math_block:
+                    kept.append("")
+                    kept.append(math_block)
+                text = "\n".join(kept)
 
             vector_add = "" # Contenuto Markdown aggiuntivo per il diagramma vettoriale.
 
             # Se l'opzione è attiva e la pagina non è già stata processata per i vettori...
-            if vectors_on and page_num not in processed_vector_pages:
+            if vectors_on and page_num not in processed_vector_pages and not dry_run:
                 bbox = get_smart_vector_crop(doc, page_num, is_debug)
                 if bbox: # Se è stato trovato un diagramma...
                     try:
@@ -252,11 +652,14 @@ def process_chapter_chunks(doc, start, end, assets_path, is_debug, vectors_on, p
                         # Renderizza solo l'area del diagramma (clip=bbox) ad alta risoluzione (Matrix(2,2)).
                         pix = page_obj.get_pixmap(matrix=pymupdf.Matrix(2, 2), clip=bbox)
                         fname = f"vector_diagram_p{page_num}.png"
-                        pix.save(assets_path / fname) # Salva l'immagine.
+                        output_img = assets_path / fname
+                        pix.save(output_img) # Salva l'immagine.
 
                         # Crea il link Markdown per l'immagine.
                         vector_add = f"\n\n![Diagramma Vettoriale (Pag. {page_num})](assets/{fname})\n> *Fonte: Diagramma vettoriale estratto tramite clustering.*\n\n"
                         processed_vector_pages.add(page_num)
+                        if verbose or is_debug:
+                            print(f"[VERBOSE] Salvato diagramma vettoriale p.{page_num} -> {output_img}")
                     except Exception as e:
                         log(f"Errore durante il salvataggio dell'immagine vettoriale: {e}", is_debug)
 
@@ -290,6 +693,8 @@ def main():
     parser.add_argument("--force-restart", action="store_true", help="Ignora la cartella di output esistente e ricomincia da zero.")
     parser.add_argument("--dry-run", action="store_true", help="Esegue una prova senza scrivere file o modificare la cartella di output.")
     parser.add_argument("--verbose", action="store_true", help="Mostra informazioni aggiuntive sulle azioni eseguite.")
+    parser.add_argument("--annotate-images", action="store_true", help="Attiva l'annotazione automatica delle immagini tramite Gemini.")
+    parser.add_argument("--gemini-model", default=GEMINI_DEFAULT_MODEL, help="Nome del modello Gemini da usare per l'annotazione delle immagini.")
 
     args = parser.parse_args()
 
@@ -307,8 +712,11 @@ def main():
     debug_mode = args.debug
     dry_run = args.dry_run
     verbose_mode = args.verbose
+    annotate_images = args.annotate_images
+    gemini_model_name = args.gemini_model
     # Logica invertita: i vettori sono attivi di default, disattivati dal nuovo flag.
     vectors_on = not args.disable_vector_images
+    gemini_model = None
 
     def vlog(msg):
         """Verbose logger: prints when `--verbose` or `--debug` are active."""
@@ -318,6 +726,14 @@ def main():
     # Controlli di base sui percorsi.
     if not input_path.exists():
         sys.exit(f"❌ Errore: Il file di input '{input_path}' non è stato trovato.")
+
+    if annotate_images:
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            sys.exit("❌ Errore: GEMINI_API_KEY non impostata. Necessaria per l'annotazione immagini con Gemini.")
+        gemini_model = _init_gemini_model(api_key, gemini_model_name)
+        if verbose_mode or debug_mode:
+            print(f"[VERBOSE] Annotazione immagini attiva con modello '{gemini_model_name}'")
 
     # Resume mode: se la cartella di output esiste, normalmente entriamo
     # nella modalità di ripresa. Se però viene passato `--force-restart`,
@@ -562,7 +978,19 @@ def main():
                     print(f"   [Resume] Will process {len(pages_to_process)} page(s) for '{title}'")
 
         # Processa solo le pagine rimanenti per questo capitolo.
-        content_body, newly_processed = process_chapter_chunks(doc, start, end, assets_dir, debug_mode, vectors_on, pages=pages_to_process)
+        content_body, newly_processed = process_chapter_chunks(
+            doc,
+            start,
+            end,
+            assets_dir,
+            debug_mode,
+            vectors_on,
+            pages=pages_to_process,
+            annotate_math=annotate_images,
+            gemini_model=gemini_model,
+            verbose=verbose_mode,
+            dry_run=dry_run,
+        )
 
         if stop_requested:
             print("   Interruzione soft: fermo elaborazione del capitolo corrente dopo il blocco attuale.")
@@ -578,6 +1006,9 @@ def main():
                 pass
         else:
             content_body = content_body.replace(str(assets_dir), "assets").replace("\\", "/")
+
+        if annotate_images:
+            content_body = annotate_images_in_markdown(content_body, current_dir, gemini_model, debug_mode, verbose_mode, dry_run)
 
         content_file = current_dir / "content.md"
         if content_file.exists():
@@ -617,25 +1048,26 @@ def main():
     # l'intero albero di output: questo assicura che il JSON rifletta
     # lo stato reale del ramo radice sul filesystem.
     final_manifest = []
-    for p in sorted([d for d in output_path.iterdir() if d.is_dir() and re.match(r"^[0-9]{2}_", d.name)],
-                    key=lambda d: int(d.name.split("_")[0])):
-        try:
-            content_file = p / "content.md"
-            if content_file.exists() and content_file.is_file():
-                # Prova a leggere il titolo dal frontmatter, altrimenti usa il nome della cartella.
-                title = p.name.split("_", 1)[1] if "_" in p.name else p.name
-                try:
-                    txt = content_file.read_text(encoding="utf-8")
-                    m = re.search(r"^title:\s*\"(.+?)\"", txt, flags=re.MULTILINE)
-                    if m:
-                        title = m.group(1)
-                except Exception:
-                    pass
+    if output_path.exists():
+        for p in sorted([d for d in output_path.iterdir() if d.is_dir() and re.match(r"^[0-9]{2}_", d.name)],
+                        key=lambda d: int(d.name.split("_")[0])):
+            try:
+                content_file = p / "content.md"
+                if content_file.exists() and content_file.is_file():
+                    # Prova a leggere il titolo dal frontmatter, altrimenti usa il nome della cartella.
+                    title = p.name.split("_", 1)[1] if "_" in p.name else p.name
+                    try:
+                        txt = content_file.read_text(encoding="utf-8")
+                        m = re.search(r"^title:\s*\"(.+?)\"", txt, flags=re.MULTILINE)
+                        if m:
+                            title = m.group(1)
+                    except Exception:
+                        pass
 
-                rel_path = str(content_file.relative_to(output_path)).replace("\\", "/")
-                final_manifest.append({"title": title, "path": rel_path})
-        except Exception:
-            continue
+                    rel_path = str(content_file.relative_to(output_path)).replace("\\", "/")
+                    final_manifest.append({"title": title, "path": rel_path})
+            except Exception:
+                continue
 
     # Se durante l'esecuzione abbiamo aggiunto nuove voci a `manifest`, possono essere già
     # presenti tra le cartelle; sostituiamo con `final_manifest` per coerenza.

@@ -40,6 +40,14 @@ else
   source ${VENVDIR}/bin/activate
 fi
 
-# Execute application:
-PYTHONPATH="${SCRIPT_PATH}/src:${PYTHONPATH}" \
-    exec ${VENVDIR}/bin/python3 -c 'from pdf2tree.core import main; raise SystemExit(main())' "$@"
+if [ -f "${SCRIPT_PATH}/.gemini-api-key" ]; then
+  GEMINI_API_KEY=$(cat "${SCRIPT_PATH}/.gemini-api-key")
+  echo "Using Gemini API Key ${GEMINI_API_KEY} from ${SCRIPT_PATH}/.gemini-api-key"
+  # Execute application:
+  GEMINI_API_KEY=${GEMINI_API_KEY} PYTHONPATH="${SCRIPT_PATH}/src:${PYTHONPATH}" \
+      exec ${VENVDIR}/bin/python3 -c 'from pdf2tree.core import main; raise SystemExit(main())' "$@"
+else
+  # Execute application:
+  PYTHONPATH="${SCRIPT_PATH}/src:${PYTHONPATH}" \
+      exec ${VENVDIR}/bin/python3 -c 'from pdf2tree.core import main; raise SystemExit(main())' "$@"
+fi
