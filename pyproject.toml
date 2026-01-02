@@ -9,8 +9,9 @@ description = "Convert PDF documents into a folder tree with Markdown content an
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "pymupdf>=1.24.2",
+  "pymupdf>=1.26.6",
   "pymupdf4llm",
+  "pymupdf_layout",
 ]
 license = { file = "LICENSE" }
 authors = [
@@ -36,7 +37,7 @@ pdf2tree = "pdf2tree.core:main"
 pdf2md = "pdf2tree.core:main"
 
 [tool.setuptools]
-packages = ["pdf2tree", "pdf_to_tree"]
+packages = ["pdf2tree"]
 package-dir = {"" = "src"}
 include-package-data = true
 

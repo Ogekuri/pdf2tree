@@ -1,6 +1,7 @@
 # Project runtime requirements (leave empty if using venv-managed installs)
-pymupdf>=1.24.2
+pymupdf>=1.26.6
 pymupdf4llm
+pymupdf_layout
 
 # Test / CI dependencies
 pytest
