@@ -1,6 +1,6 @@
 #!/bin/bash
 # -*- coding: utf-8 -*-
-# VERSION: 0.0.22
+# VERSION: 0.0.0
 # AUTHORS: Ogekuri
 
 now=$(date '+%Y-%m-%d_%H-%M-%S')
@@ -42,4 +42,4 @@ fi
 
 # Execute application:
 PYTHONPATH="${SCRIPT_PATH}/src:${PYTHONPATH}" \
-    exec ${VENVDIR}/bin/python3 -c 'from pdf_to_tree.core import main; raise SystemExit(main())' "$@"
+    exec ${VENVDIR}/bin/python3 -c 'from pdf2tree.core import main; raise SystemExit(main())' "$@"
