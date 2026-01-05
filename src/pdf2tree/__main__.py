@@ -1,4 +1,4 @@
-"""Allow `python -m pdf2tree` execution."""
+"""Consente l'esecuzione tramite `python -m pdf2tree`."""
 
 import sys
 

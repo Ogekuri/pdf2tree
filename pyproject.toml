@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pdf2tree"
-version = "0.0.3"
+version = "0.0.4"
 description = "Convert PDF documents into a folder tree with Markdown content and extracted assets."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,6 +12,8 @@ dependencies = [
   "pymupdf>=1.26.6",
   "pymupdf4llm",
   "pymupdf_layout",
+  "pix2tex",
+  "pillow",
   "google-generativeai",
 ]
 license = { file = "LICENSE" }

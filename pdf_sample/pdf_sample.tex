@@ -1,0 +1,334 @@
+\documentclass[a4paper,11pt]{report}
+
+% Encoding e lingua
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+
+% Matematica
+\usepackage{amsmath,amssymb}
+
+% Grafica e immagini
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{mwe}       % immagini di esempio: example-image-a, ecc.
+\usepackage[a4paper,left=1cm,right=1cm,top=1.5cm,bottom=2cm]{geometry}
+
+% Link cliccabili nell'indice e nel testo
+\usepackage{hyperref}
+
+% Testo fittizio
+\usepackage{lipsum}
+\usepackage{fancyhdr}
+\setlength{\headheight}{13.6pt}
+
+\begin{document}
+
+\title{Documento Casuale di Esempio}
+\author{Generato automaticamente}
+\date{\today}
+
+\maketitle
+
+\tableofcontents
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Generato automaticamente}
+\fancyhead[C]{Documento Casuale di Esempio}
+\fancyhead[R]{\nouppercase{\leftmark}}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancyfoot[C]{\thepage}
+\fancypagestyle{plain}{%
+  \fancyhf{}%
+  \fancyhead[L]{Generato automaticamente}%
+  \fancyhead[C]{Documento Casuale di Esempio}%
+  \fancyhead[R]{\nouppercase{\leftmark}}%
+  \renewcommand{\headrulewidth}{0.4pt}%
+  \fancyfoot[C]{\thepage}%
+}
+
+\clearpage
+
+%====================================================
+\chapter{Introduzione Stravagante}
+%====================================================
+
+\section{Motivazioni improbabili}
+
+Questo documento non ha alcuno scopo pratico preciso, se non quello di mostrare
+un albero di capitoli e sotto-capitoli con contenuti misti:
+tabelle, immagini raster, figure vettoriali e formule matematiche.
+
+\lipsum[1-2]
+
+\section{Formule apparentemente profonde}
+
+Consideriamo una funzione $f \colon \mathbb{R} \to \mathbb{R}$ definita da
+\[
+  f(x) = e^{-x^2}\sin(3x).
+\]
+Possiamo calcolare (o fingere di calcolare) la seguente integrale:
+\[
+  I = \int_{-\infty}^{+\infty} e^{-x^2}\sin(3x)\,dx.
+\]
+
+Un altro esempio di formula un po' casuale:
+\[
+  \sum_{n=1}^{\infty} \frac{(-1)^n}{n^2} = -\frac{\pi^2}{12}.
+\]
+
+Infine, un sistema di equazioni lineari:
+\[
+\begin{cases}
+  2x + 3y - z = 1, \\
+  -x + 4y + 5z = 0, \\
+  x - y + 2z = 3.
+\end{cases}
+\]
+
+%====================================================
+\chapter{Dati Senza Senso}
+%====================================================
+
+\section{Tabella di numeri casuali}
+
+Nel seguito, presentiamo una tabella di numeri perfettamente inutili,
+che non rappresentano niente di reale.
+
+\begin{table}[h]
+  \centering
+  \begin{tabular}{lccc}
+    \toprule
+    Etichetta & $x$ & $y$ & $z$ \\
+    \midrule
+    A & 3.14 & -1.00 & 42 \\
+    B & 0.00 & 1.73  & -7 \\
+    C & -2.50 & 0.99 & 13 \\
+    D & 6.28 & -3.14 & 0 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Tabella totalmente priva di significato pratico.}
+  \label{tab:nonsenso}
+\end{table}
+
+Possiamo anche collegare questi valori ad una pseudo-funzione:
+\[
+  g(t) = x \sin(t) + y \cos(t) + z,
+\]
+dove $(x,y,z)$ sono scelti a caso dalla Tabella~\ref{tab:nonsenso}.
+
+\section{Ancora un po' di testo casuale}
+
+\lipsum[3-4]
+
+%====================================================
+\chapter{Immagini Misteriose}
+%====================================================
+
+\section{Immagine raster di esempio}
+
+Qui inseriamo una immagine “raster” di esempio. Se hai un file
+\texttt{mia\_immagine.png}, puoi sostituire \texttt{example-image-a}
+con il nome del tuo file.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.7\textwidth]{example-image-a}
+  \caption{Immagine raster di esempio (sostituibile con una tua PNG/JPG).}
+  \label{fig:raster1}
+\end{figure}
+
+Come se non bastasse, ecco un'altra immagine:
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.5\textwidth]{example-image-b}
+  \caption{Seconda immagine raster di esempio.}
+  \label{fig:raster2}
+\end{figure}
+
+\clearpage
+
+\section{Mini-esperimento numerico con immagini}
+
+Immaginiamo che le figure \ref{fig:raster1} e \ref{fig:raster2} rappresentino
+due misurazioni sperimentali di una certa grandezza (anche se non è vero).
+Possiamo “definire” una distanza fittizia $d$ tra le due immagini come:
+\[
+  d = \sqrt{(x_1 - x_2)^2 + (y_1 - y_2)^2},
+\]
+dove $(x_1,y_1)$ e $(x_2,y_2)$ sono coordinate immaginarie associate alle figure.
+
+%====================================================
+\chapter{Figure Vettoriali e Geometria}
+%====================================================
+
+\section{Diagramma vettoriale con TikZ}
+
+Ora passiamo a una figura vettoriale, generata direttamente in PDF tramite TikZ.
+
+\begin{figure}[h]
+  \centering
+  \begin{tikzpicture}[scale=1.0]
+    % Assi cartesiani
+    \draw[->] (-0.5,0) -- (4.5,0) node[right] {$x$};
+    \draw[->] (0,-0.5) -- (0,3.5) node[above] {$y$};
+
+    % Vettore v
+    \draw[thick] (0,0) -- (3,2) node[midway, above] {$\vec v$};
+    \fill (3,2) circle (2pt) node[right]{$(3,2)$};
+
+    % Proiezioni
+    \draw[thick,dashed] (3,0) node[below]{$3$} -- (3,2);
+    \draw[thick,dashed] (0,2) node[left]{$2$} -- (3,2);
+
+    % Angolo
+    \node at (1.5,0.3) {$\theta$};
+    \draw (0.7,0) arc (0:34:0.7);
+  \end{tikzpicture}
+  \caption{Esempio di figura vettoriale generata con TikZ.}
+  \label{fig:tikz}
+\end{figure}
+
+Questa figura è “vettoriale” nel senso che viene disegnata tramite istruzioni
+di TikZ e quindi è scalabile senza perdita di qualità.
+
+\section{Una formula legata alla figura}
+
+Se interpretiamo $\vec v = (3,2)$ come un vettore nel piano,
+la sua norma euclidea è
+\[
+  \|\vec v\| = \sqrt{3^2 + 2^2} = \sqrt{13}.
+\]
+L'angolo $\theta$ che forma con l'asse $x$ è dato da
+\[
+  \theta = \arctan\left(\frac{2}{3}\right).
+\]
+
+\lipsum[5]
+
+%====================================================
+\chapter{Formule Matematiche Casuali}
+%====================================================
+
+\section{Equazioni differenziali}
+
+\lipsum[8]
+
+Un'equazione differenziale ordinaria del secondo ordine:
+\[
+    \frac{d^2y}{dx^2} + 2\frac{dy}{dx} + y = \cos(x)
+\]
+
+E una equazione alle derivate parziali (l'equazione del calore):
+\[
+    \frac{\partial u}{\partial t} = \alpha \nabla^2 u = \alpha \left( \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} + \frac{\partial^2 u}{\partial z^2} \right)
+\]
+
+\section{Algebra lineare}
+
+\lipsum[9]
+
+Una matrice 3x3 casuale:
+\[
+A = \begin{pmatrix}
+    a & b & c \\
+    d & e & f \\
+    g & h & i
+\end{pmatrix}
+\]
+
+Il suo determinante è dato da:
+\[
+    \det(A) = a(ei - fh) - b(di - fg) + c(dh - eg)
+\]
+
+%====================================================
+\chapter{Flow Chart Casuale}
+%====================================================
+
+\begin{figure}[p]
+  \centering
+  \begin{tikzpicture}[node distance=12mm, auto,>=Stealth, every node/.style={font=\small}]
+    \tikzstyle{startstop} = [rectangle, rounded corners, minimum width=3cm, minimum height=8mm, text centered, draw=black, fill=gray!10]
+    \tikzstyle{process} = [rectangle, minimum width=3cm, minimum height=8mm, text centered, draw=black, fill=blue!10]
+    \tikzstyle{decision} = [diamond, aspect=2, text centered, draw=black, fill=green!10]
+    \node[startstop] (start) {Inizio};
+    \node[process, below=of start] (step1) {Step 1};
+    \node[decision, below=of step1] (decide) {Condizione?};
+    \node[process, below left=of decide] (step2) {Step 2};
+    \node[process, below right=of decide] (step3) {Step 3};
+    \node[startstop, below=of decide, yshift=-18mm] (stop) {Fine};
+    \draw[->] (start) -- (step1);
+    \draw[->] (step1) -- (decide);
+    \draw[->] (decide) -- node[left] {Sì} (step2);
+    \draw[->] (decide) -- node[right] {No} (step3);
+    \draw[->] (step2) |- (stop);
+    \draw[->] (step3) |- (stop);
+  \end{tikzpicture}
+  \caption{Flow chart casuale generato con TikZ.}
+  \label{fig:flowchart}
+\end{figure}
+
+%====================================================
+\chapter{Conti Matriciali Sconclusionati}
+%====================================================
+
+\section{Prodotti tra matrici 2x2}
+
+Scegliamo due matrici $2 \times 2$ con numeri interi raccolti a caso:
+\[
+  M =
+  \begin{pmatrix}
+    2 & -1 \\
+    3 & 4
+  \end{pmatrix},
+  \qquad
+  N =
+  \begin{pmatrix}
+    1 & 5 \\
+    -2 & 0
+  \end{pmatrix}.
+\]
+
+Il prodotto $P = M \cdot N$ risulta:
+\[
+  P =
+  \begin{pmatrix}
+    4 & 10 \\
+    -5 & 15
+  \end{pmatrix}.
+\]
+
+\section{Determinanti e tracce a caso}
+
+I determinanti delle tre matrici sono
+\begin{align*}
+  \det(M) &= 2 \cdot 4 - (-1) \cdot 3 = 11, \\
+  \det(N) &= 1 \cdot 0 - 5 \cdot (-2) = 10, \\
+  \det(P) &= 4 \cdot 15 - 10 \cdot (-5) = 110 = \det(M)\,\det(N).
+\end{align*}
+
+La traccia di $P$ è $\operatorname{tr}(P) = 4 + 15 = 19$, un numero
+che non rivela segreti cosmici ma conferma che i conti tornano.
+
+\lipsum[5]
+
+%====================================================
+\chapter{Conclusioni Inutili}
+%====================================================
+
+\section{Riflessioni finali}
+
+\lipsum[6-7]
+
+In conclusione, questo documento dimostra solo che si possono mischiare
+contenuti completamente casuali in un unico file LaTeX:
+tabelle, immagini, formule e figure vettoriali,
+senza alcuna coerenza scientifica ma con una struttura formale ordinata.
+
+\end{document}

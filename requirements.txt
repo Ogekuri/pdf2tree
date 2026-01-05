@@ -2,7 +2,13 @@
 pymupdf>=1.26.6
 pymupdf4llm
 pymupdf_layout
-google-generativeai
+opencv-python
+pix2tex
+albumentations
+pillow
+google-genai
+pylatexenc
+matplotlib
 
 # Test / CI dependencies
 pytest

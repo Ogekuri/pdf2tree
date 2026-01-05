@@ -1,7 +1,7 @@
 ---
 title: "Requisiti pdf_sample"
 description: Specifica dei requisiti software
-date: "2026-01-02"
+date: "2026-01-05"
 author: "Codex"
 scope:
   paths:
@@ -13,9 +13,9 @@ tags: ["markdown", "requirements", "example"]
 ---
 
 # Requisiti pdf_sample
-**Versione**: 0.1
+**Versione**: 0.4
 **Autore**: Codex  
-**Data**: 2026-01-02
+**Data**: 2026-01-05
 
 ## Indice
 <!-- TOC -->
@@ -36,7 +36,10 @@ tags: ["markdown", "requirements", "example"]
 ## Storico revisioni
 | Data | Versione | Motivo e descrizione della modifica |
 |------|----------|-------------------------------------|
+| 2026-01-05 | 0.4 | Rifinito il PDF di esempio affinché esponga un indice duplicato e intestazioni grassetto per validare la normalizzazione Markdown nel post-processing |
 | 2026-01-02 | 0.1 | Bozza iniziale basata sul sorgente |
+| 2026-01-14 | 0.2 | Aggiunta requisito compilazione doppia con PDF con/ senza TOC partendo solo dal sorgente |
+| 2026-01-04 | 0.3 | Vincolata la doppia compilazione unica per sessione di test condivisa dalla suite |
 
 ## 1. Introduzione
 Questo documento definisce i requisiti del progetto pdf_sample. L'obiettivo e' descrivere il comportamento atteso del sorgente LaTeX che genera un PDF dimostrativo.
@@ -121,6 +124,7 @@ Ottimizzazioni e miglioramenti prestazionali:
 - **SAMPLE-DES-002**: Il documento deve includere le librerie TikZ `shapes.geometric`, `arrows.meta` e `positioning` per i diagrammi.
 - **SAMPLE-DES-003**: L'intestazione deve mostrare autore a sinistra, titolo al centro e capitolo corrente a destra, con una linea orizzontale sotto l'intestazione.
 - **SAMPLE-DES-004**: Il documento deve rendere l'indice cliccabile tramite il pacchetto `hyperref`.
+- **SAMPLE-DES-005**: La procedura di compilazione deve eseguire in sequenza unica le due passate di `pdflatex` (prima senza TOC, poi con TOC) riutilizzando i PDF risultanti per l'intera suite di test senza ulteriori ricompilazioni.
 
 ### 3.2 Funzioni
 - **SAMPLE-REQ-001**: Il documento deve includere i capitoli nell'ordine: "Introduzione Stravagante", "Dati Senza Senso", "Immagini Misteriose", "Figure Vettoriali e Geometria", "Formule Matematiche Casuali", "Flow Chart Casuale", "Conti Matriciali Sconclusionati", "Conclusioni Inutili".
@@ -129,3 +133,5 @@ Ottimizzazioni e miglioramenti prestazionali:
 - **SAMPLE-REQ-004**: Il documento deve includere almeno una figura vettoriale generata con TikZ.
 - **SAMPLE-REQ-005**: Il documento deve includere un flow chart a pagina intera generato con TikZ.
 - **SAMPLE-REQ-006**: Il documento deve includere formule matematiche che coprano integrali, sistemi di equazioni e matrici.
+- **SAMPLE-REQ-007**: Il documento deve poter essere compilato da zero in due passaggi successivi producendo prima un PDF senza TOC con il relativo file `.toc`, rinominando il primo PDF, quindi un PDF finale con TOC completo, partendo esclusivamente dal sorgente `pdf_sample.tex`.
+- **SAMPLE-REQ-008**: Il PDF di esempio deve introdurre un indice secondario (intestazioni in grassetto e tabella) collocato all'inizio del contenuto principale per permettere la verifica della rimozione del secondo indice e della normalizzazione delle intestazioni nel Markdown post-processing.

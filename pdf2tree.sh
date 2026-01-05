@@ -1,6 +1,6 @@
 #!/bin/bash
 # -*- coding: utf-8 -*-
-# VERSION: 0.0.3
+# VERSION: 0.0.4
 # AUTHORS: Ogekuri
 
 now=$(date '+%Y-%m-%d_%H-%M-%S')
@@ -40,14 +40,7 @@ else
   source ${VENVDIR}/bin/activate
 fi
 
-if [ -f "${SCRIPT_PATH}/.gemini-api-key" ]; then
-  GEMINI_API_KEY=$(cat "${SCRIPT_PATH}/.gemini-api-key")
-  echo "Using Gemini API Key ${GEMINI_API_KEY} from ${SCRIPT_PATH}/.gemini-api-key"
-  # Execute application:
-  GEMINI_API_KEY=${GEMINI_API_KEY} PYTHONPATH="${SCRIPT_PATH}/src:${PYTHONPATH}" \
-      exec ${VENVDIR}/bin/python3 -c 'from pdf2tree.core import main; raise SystemExit(main())' "$@"
-else
-  # Execute application:
-  PYTHONPATH="${SCRIPT_PATH}/src:${PYTHONPATH}" \
-      exec ${VENVDIR}/bin/python3 -c 'from pdf2tree.core import main; raise SystemExit(main())' "$@"
-fi
+# Execute application:
+PYTHONPATH="${SCRIPT_PATH}/src:${PYTHONPATH}" \
+    exec ${VENVDIR}/bin/python3 -c 'from pdf2tree.core import main; raise SystemExit(main())' "$@"
+

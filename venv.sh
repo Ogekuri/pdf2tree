@@ -1,5 +1,5 @@
 #!/bin/bash
-# VERSION: 0.0.3
+# VERSION: 0.0.4
 # AUTHORS: Ogekuri
 
 cd -- "$(dirname "$0")/"
@@ -17,7 +17,7 @@ fi
 if ! [ -d "${VENVDIR}/" ]; then
     echo -n "Create virtual environment ..."
     mkdir ${VENVDIR}/
-    virtualenv --python=python3 ${VENVDIR}/ >/dev/null
+    virtualenv --python=python3 ${VENVDIR}/
     echo "done."
 fi
 
@@ -25,5 +25,5 @@ fi
 source ${VENVDIR}/bin/activate
 
 echo -n "Install python requirements ..."
-${VENVDIR}/bin/pip install -r requirements.txt >/dev/null
+${VENVDIR}/bin/pip install -r requirements.txt
 echo "done."

@@ -1,8 +1,8 @@
-"""Compatibility package for the pdf2tree CLI."""
+"""Pacchetto di compatibilità per la CLI di pdf2tree."""
 
 from pdf2tree.core import main
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 from .core import main  # noqa: F401
 

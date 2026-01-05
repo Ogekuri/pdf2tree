@@ -30,6 +30,8 @@
 !tech/**/*
 !tests/
 !tests/**/*
+!pdf_sample/
+!pdf_sample/**/*.tex
 
 ##########################################
 # Exlucde specific files and directories #
@@ -249,3 +251,5 @@ temp/
 # Gemini API Key
 .gemini-api-key
 
+# Examples
+examples/

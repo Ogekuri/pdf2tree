@@ -5,6 +5,11 @@
 ### Alpha Stage
 #### Todo List ✓
 - [x] new: Initial alpha stage release
+- [ ] new: implementare --n-pages
+- [x] new: implementare --disable-pix2tex
+- [x] new: implementare --disable-annotate-images e --enable-annotate-equations
+- [x] new: implementare --post-processing e --post-processing-only
+- [ ] fix: la formula nella sezione 2.1 Tabella di numeri casuali  e 3.2 Mini-esperimento numerico con immagini non viene rilevata se header se footer
 - [ ] test: Testing and bug fixes
 - [ ] new: Initial beta stage release
 
