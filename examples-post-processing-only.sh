@@ -1,7 +1,5 @@
 #!/bin/bash
 
-./pdf2tree.sh
-
 # Verifica se la variabile GEMINI_API_KEY è definita e non vuota
 if [ -n "$GEMINI_API_KEY" ]; then
     echo "[INFO] GEMINI_API_KEY=$GEMINI_API_KEY."
