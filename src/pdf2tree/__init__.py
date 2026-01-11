@@ -2,7 +2,7 @@
 
 from pdf2tree.core import main
 
-__version__ = "0.0.6"
+__version__ = "0.0.7"
 
 from .core import main  # noqa: F401
 

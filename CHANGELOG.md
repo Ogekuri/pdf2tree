@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.7](https://github.com/Ogekuri/pdf2tree/compare/v0.0.6..v0.0.7) - 2026-01-11
+### ⛰️  Features
+- *(core)* implement new version check.
+
 ## [0.0.6](https://github.com/Ogekuri/pdf2tree/compare/v0.0.5..v0.0.6) - 2026-01-11
 ### ⛰️  Features
 - *(core)* implement --version command.
@@ -32,9 +36,11 @@
 - \[0.0.3\]: https://github.com/Ogekuri/pdf2tree/releases/tag/v0.0.3
 - \[0.0.5\]: https://github.com/Ogekuri/pdf2tree/releases/tag/v0.0.5
 - \[0.0.6\]: https://github.com/Ogekuri/pdf2tree/releases/tag/v0.0.6
+- \[0.0.7\]: https://github.com/Ogekuri/pdf2tree/releases/tag/v0.0.7
 
 [0.0.1]: https://github.com/Ogekuri/pdf2tree/releases/tag/v0.0.1
 [0.0.2]: https://github.com/Ogekuri/pdf2tree/compare/v0.0.1..v0.0.2
 [0.0.3]: https://github.com/Ogekuri/pdf2tree/compare/v0.0.2..v0.0.3
 [0.0.5]: https://github.com/Ogekuri/pdf2tree/compare/v0.0.3..v0.0.5
 [0.0.6]: https://github.com/Ogekuri/pdf2tree/compare/v0.0.5..v0.0.6
+[0.0.7]: https://github.com/Ogekuri/pdf2tree/compare/v0.0.6..v0.0.7
