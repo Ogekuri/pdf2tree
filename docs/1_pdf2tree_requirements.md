@@ -1,7 +1,7 @@
 ---
 title: "Requisiti pdf2tree"
 description: Specifica dei requisiti software
-date: "2026-01-05"
+date: "2026-01-11"
 author: "Codex"
 scope:
   paths:
@@ -17,14 +17,14 @@ tags: ["markdown", "requirements", "example"]
 ---
 
 # Requisiti pdf2tree
-**Versione**: 0.70
+**Versione**: 0.84
 **Autore**: Codex  
-**Data**: 2026-01-05
+**Data**: 2026-01-11
 
-## Indice
+## TOC
 <!-- TOC -->
 - [Requisiti pdf2tree](#requisiti-pdf2tree)
-  - [Indice](#indice)
+  - [TOC](#toc)
   - [Storico revisioni](#storico-revisioni)
   - [1. Introduzione](#1-introduzione)
     - [1.1 Regole del documento](#11-regole-del-documento)
@@ -99,6 +99,19 @@ tags: ["markdown", "requirements", "example"]
 | 2026-01-05 | 0.68 | Introduzione di `normalize_markdown_format` per standardizzare i tag HTML `<br>` in newline prima della rimozione dell'indice duplicato nella normalizzazione Markdown |
 | 2026-01-05 | 0.69 | Rinomina il campo `page` dei nodi `toc_tree` in `pdf_source_page` e aggiunge il requisito/test che ne verifica la presenza nel manifest |
 | 2026-01-05 | 0.70 | Aggiunge il requisito di marcare righe e byte del Markdown per ogni nodo TOC, tabella e immagine nel manifest |
+| 2026-01-05 | 0.71 | Precisione degli intervalli TOC: i nodi devono coprire dalla propria intestazione fino all'ultima riga/byte dell'ultimo discendente |
+| 2026-01-05 | 0.72 | Estesi gli intervalli di righe/byte delle tabelle per includere anche il blocco tabellare immediatamente precedente ai link Markdown/CSV |
+| 2026-01-05 | 0.74 | Introdotta la fase di cleanup nel post-processing (disattivabile) per rimuovere TOC iniziale e marker di pagina prima dell'assegnazione ID |
+| 2026-01-07 | 0.75 | Rinominata remove_markdown_index con nuova logica di taglio iniziale, tolta la rimozione TOC dal cleanup, aggiunta add_pdf_toc_to_markdown e flag --disable-toc |
+| 2026-01-07 | 0.76 | Allineata l'intestazione TOC del Markdown a "## TOC" per rispecchiare il PDF |
+| 2026-01-07 | 0.77 | La TOC inserita nel Markdown deve avere intestazione esattamente `## TOC`, senza varianti in grassetto o altri prefissi |
+| 2026-01-07 | 0.78 | La TOC inserita nel Markdown deve avere intestazione esattamente `** PDF TOC **` al posto di `## TOC` |
+| 2026-01-07 | 0.79 | Aggiunta fase di `cleanup_manifest` che rimuove `pdf_source_page` dal manifest salvo flag `--enable-pdf-pages-ref` |
+| 2026-01-07 | 0.80 | Rinominati i campi del manifest `start_byte`/`end_byte` in `start_char`/`end_char` mantenendo la stessa logica di calcolo |
+| 2026-01-07 | 0.81 | Ridefinite le regole degli intervalli TOC: `start_line/start_char` partono dalla riga della voce TOC corrispondente in Markdown e `end_line/end_char` si fermano alla riga precedente la voce successiva; i genitori non includono i figli; l’ultima voce termina a fine file |
+| 2026-01-07 | 0.82 | La fase di cleanup del Markdown deve degradare le intestazioni non appartenenti alla TOC del PDF prima di rimuovere i marker di pagina |
+| 2026-01-07 | 0.83 | La CLI deve stampare l'help completo quando mancano i parametri obbligatori prima di terminare con errore |
+| 2026-01-11 | 0.84 | Aggiunta opzione CLI --version/--ver per stampare la versione e terminare |
 
 
 ## 1. Introduzione
@@ -244,7 +257,7 @@ Componenti e librerie utilizzati:
 - **CORE-DES-041**: L'intera suite di unit test deve generare i PDF di esempio con una singola sequenza di compilazione LaTeX condivisa (prima passata senza TOC, seconda con TOC) riutilizzando i file prodotti, senza ricompilazioni supplementari; il test sulla mancanza di TOC deve basarsi sul PDF privo di indice ottenuto dalla prima compilazione.
 - **CORE-DES-042**: Il codice deve evidenziare con messaggi di log e commenti il punto in cui l'elaborazione si arresta per mancanza del flag `--post-processing` e il punto da cui riprende quando viene usato `--post-processing-only`, in modo che il comportamento sia immediatamente distinguibile durante l'esecuzione.
 - **CORE-DES-043**: Nella pipeline di post-processing esiste una fase `remove-small-images`, abilitata di default (disattivabile con `--disable-remove-small-images`), che scansiona le immagini elencate nel manifest durante `--post-processing` e `--post-processing-only`, misura le dimensioni effettive delle immagini e, quando entrambe le dimensioni risultano inferiori alle soglie configurate, rimuove le voci corrispondenti dal manifest e i riferimenti dal Markdown (inclusi i blocchi Pix2Tex e le annotazioni) indicando in modalità `--verbose` l'esito (KEEP/REMOVE) e le dimensioni, ma lascia i file PNG originali sul disco affinché siano riutilizzabili o cancellabili manualmente.
-- **CORE-DES-056**: La creazione del manifest nel post-processing deve essere suddivisa in step distinti ciascuno implementato in una funzione dedicata e orchestrato da `run_post_processing_pipeline`, includendo almeno: ripristino del Markdown dal backup `.processing.md`, normalizzazione tramite `normalize_markdown_file` che rimuove l'indice duplicato, riallinea le intestazioni alla TOC del PDF e rigenera il file `.toc` in formato Markdown, validazione della `.toc` contro la TOC del PDF, costruzione del manifest e scrittura su disco.
+- **CORE-DES-056**: La creazione del manifest nel post-processing deve essere suddivisa in step distinti ciascuno implementato in una funzione dedicata e orchestrato da `run_post_processing_pipeline`, includendo almeno: ripristino del Markdown dal backup `.processing.md`, normalizzazione tramite `normalize_markdown_file` che rimuove il contenuto iniziale fino alla prima voce della TOC del PDF mantenendo i marker di pagina, riallinea le intestazioni al `pdf_toc`, opzionalmente inserisce una TOC Markdown derivata dal `pdf_toc`, rigenera il file `.toc` in formato Markdown, valida la `.toc` contro la TOC del PDF, costruisce il manifest e scrive su disco.
 - **CORE-DES-057**: La generazione del file `.toc` deve estrarre dal Markdown tutte le intestazioni (livelli `#`, `##`, `###`, ...), tutti i riferimenti a immagini in `images/` e tutti i riferimenti a tabelle in `tables/` applicando una lista di espressioni regolari, scrivendo il risultato in un file `.toc` (formato Markdown) nella cartella di output.
 - **CORE-DES-058**: La TOC estratta dal file `.toc` deve essere validata confrontandola con la TOC del PDF (`doc.get_toc()`); il confronto deve avvenire su numero di voci e titoli normalizzati (rimozione di numerazione, enfasi, spaziatura e virgolette tipografiche), ignorando le differenze di livello. Se il conteggio o i titoli normalizzati non coincidono la pipeline di post-processing deve comunque proseguire tutte le fasi successive (costruzione manifest, remove-small-images, Pix2Tex, annotazioni).
 - **CORE-DES-059**: La fase `remove-small-images` deve essere eseguita solo dopo il completamento della pipeline di normalizzazione del Markdown (inclusi rimozione indice duplicato, riallineamento intestazioni alla TOC del PDF e rigenerazione `.toc`) e di creazione/validazione del manifest.
@@ -253,14 +266,25 @@ Componenti e librerie utilizzati:
 - **CORE-DES-062**: In caso di mismatch TOC, la modalità `--verbose` deve stampare l'intera TOC confrontata (PDF vs Markdown) evidenziando per ogni voce l'esito dei controlli (OK/FAIL) e indicando eventuali differenze di conteggio.
 - **CORE-DES-063**: In caso di mismatch TOC, la modalità `--debug` deve stampare informazioni tecniche di diagnosi (liste normalizzate, indici dei primi mismatch, conteggi PDF/Markdown) oltre al riepilogo del mismatch già visibile senza debug.
 - **CORE-DES-064**: La costruzione del manifest deve essere centralizzata in una funzione dedicata invocata da `run_post_processing_pipeline` immediatamente dopo la validazione della TOC, evitando duplicazioni e garantendo la conservazione dei metadati (`source`, `type`, `equation`, `annotation`).
-- **CORE-DES-065**: La funzione `normalize_markdown_file` deve essere invocata da `run_post_processing_pipeline` subito dopo il ripristino del Markdown dal backup `.processing.md`, utilizzare la TOC nativa del PDF per normalizzare le intestazioni del Markdown, rigenerare il file `.toc` coerente e restituire il Markdown normalizzato insieme alle intestazioni da validare; la funzione deve anche salvare su disco sia il Markdown normalizzato sia il `.toc` generato.
+- **CORE-DES-065**: La funzione `normalize_markdown_file` deve essere invocata da `run_post_processing_pipeline` subito dopo il ripristino del Markdown dal backup `.processing.md`, eseguire in ordine `normalize_markdown_format`, `remove_markdown_index` (che elimina tutto il contenuto iniziale prima della prima voce del `pdf_toc` preservando le righe di marker pagina), `normalize_markdown_headings` (solo riallineamento delle intestazioni esistenti), `clean_markdown_headings`, quindi facoltativamente `add_pdf_toc_to_markdown` se non disabilitata, rigenerare il file `.toc` coerente e restituire il Markdown normalizzato insieme alle intestazioni da validare; la funzione deve salvare su disco sia il Markdown normalizzato sia il `.toc` generato.
 - **CORE-DES-067**: La funzione `normalize_markdown_file` deve eseguire un passaggio `clean_markdown_headings` che individua tutte le intestazioni Markdown (`#`, `##`, `###`, etc.) non presenti nella TOC del PDF (inclusa "Index") e le converte in testo maiuscolo in grassetto, rimuovendo il qualificatore di titolo; le intestazioni presenti nella TOC devono rimanere inalterate.
 - **CORE-DES-072**: La funzione `normalize_markdown_file` deve invocare `normalize_markdown_format` prima della rimozione dell'indice duplicato; `normalize_markdown_format` deve convertire i tag HTML `<br>`, `<br/>` e `<br />` in newline per garantire un Markdown coerente nella normalizzazione.
 - **CORE-DES-068**: La pipeline di post-processing deve assegnare ID univoci e stabili a tutte le entità del manifest (nodi TOC, tabelle, immagini) e salvarli nel JSON finale.
 - **CORE-DES-069**: Ogni nodo della TOC serializzata nel manifest deve includere `parent_id`, `next_id` e `prev_id`: `parent_id` punta al nodo padre se presente; `next_id` punta al nodo visitato immediatamente successivo nell'ordine di lettura DFS (fratello o primo discendente del successivo parallelo); `prev_id` punta al nodo visitato immediatamente precedente nell'ordine di lettura DFS, cioè l'ultimo discendente dell'elemento precedente, senza riaffidarsi al `parent_id`.
 - **CORE-DES-070**: Ogni tabella nel manifest deve includere `id`, `parent_id`, `next_id` e `prev_id`; `parent_id` punta al nodo TOC della sezione Markdown che contiene la tabella; `next_id` e `prev_id` puntano solo alle tabelle sorelle se esistono (altrimenti sono omessi); il nodo TOC padre deve esporre un array `tables` con gli ID delle tabelle figlie.
 - **CORE-DES-071**: Ogni immagine nel manifest deve includere `id`, `parent_id`, `next_id` e `prev_id`; `parent_id` punta al nodo TOC della sezione Markdown che contiene l'immagine; `next_id` e `prev_id` puntano solo alle immagini sorelle se esistono (altrimenti sono omessi); il nodo TOC padre deve esporre un array `images` con gli ID delle immagini figlie.
-- **CORE-DES-074**: Il manifest JSON deve annotare ogni nodo `markdown.toc_tree`, ogni voce `tables` e ogni voce `images` con i campi `start_line`, `end_line`, `start_byte` e `end_byte` che delimitano il blocco Markdown corrispondente, seguendo l'ordine di lettura del TOC (saltando l'indice duplicato iniziale), includendo nei blocchi delle tabelle i riferimenti `[Markdown](tables/...)` e `[CSV](tables/...)` e nelle immagini le righe `----- Start/End of equation -----`, il link all'immagine e i blocchi `----- Start/End of annotation -----` quando presenti per coprire l'intera sezione.
+- **CORE-DES-074**: Il manifest JSON deve annotare ogni nodo `markdown.toc_tree`, ogni voce `tables` e ogni voce `images` con i campi `start_line`, `end_line`, `start_char` e `end_char` che delimitano il blocco Markdown corrispondente, seguendo l'ordine di lettura del TOC (saltando l'indice duplicato iniziale). Per le tabelle l'intervallo include i riferimenti `[Markdown](tables/...)` e `[CSV](tables/...)` e il blocco tabellare immediatamente precedente ai link (intestazione e righe della tabella); per le immagini include le righe `----- Start/End of equation -----`, il link all'immagine e i blocchi `----- Start/End of annotation -----` quando presenti. Per i nodi della TOC `start_line`/`start_char` devono derivare dalla riga della specifica voce TOC presente nel Markdown (intestazione reale o link TOC), mentre `end_line`/`end_char` si fermano alla riga precedente la voce TOC successiva nello stesso ordine di lettura; i nodi padre non includono il contenuto dei figli e l'ultima voce termina all'ultima riga/carattere del file Markdown.
+- **CORE-DES-075**: La pipeline di post-processing deve includere una fase di cleanup abilitata di default (disattivabile con flag CLI) eseguita subito prima di `generate_item_ids`, che pulisce il Markdown rimuovendo tutte le righe di marker `--- start/end of page.page_number=<num> ---` mantenendo eventuali TOC inserite, e salva il Markdown aggiornato per le fasi successive.
+
+- **CORE-DES-080**: La fase `cleanup_markdown` deve applicare `clean_markdown_headings` usando la TOC del PDF per degradare tutte le intestazioni non presenti nella TOC prima di rimuovere i marker di pagina, così da consegnare un Markdown finale senza heading estranei.
+
+- **CORE-DES-081**: Quando gli argomenti obbligatori non sono forniti (inclusa l'esecuzione senza parametri o senza `--from-file`/`--to-dir` salvo uso di `--write-prompts`), la CLI deve stampare l'intero help/usage prima di terminare con il codice di errore per argomenti non validi.
+- **CORE-DES-082**: La CLI deve supportare i flag `--version` e `--ver` che stampano esclusivamente la versione corrente del programma su stdout (solo la stringa versione, più newline) e terminano con codice `0` senza eseguire altre validazioni, senza stampare il banner e senza avviare alcuna pipeline.
+
+- **CORE-DES-077**: La funzione `add_pdf_toc_to_markdown` deve inserire all'inizio del Markdown, subito dopo il marker di start della prima pagina (o all'inizio se assente), una TOC gerarchica basata sul `pdf_toc` con intestazione esattamente `** PDF TOC **` (non sono ammessi formati alternativi) e voci annidate in base al livello, ciascuna con link interno alla sezione corrispondente già presente nel Markdown.
+- **CORE-DES-078**: La CLI deve esporre il flag `--disable-toc` (incluso nel riepilogo parametri) che disabilita l'inserimento della TOC Markdown da parte di `add_pdf_toc_to_markdown`, lasciando inalterate le altre fasi della pipeline di normalizzazione e validazione.
+- **CORE-DES-076**: La CLI deve esporre il flag `--disable-cleanup` per disattivare la fase di cleanup; il riepilogo parametri deve indicarne lo stato (ON/OFF) e, in assenza del flag, la pulizia deve rimanere attiva.
+- **CORE-DES-079**: La pipeline di post-processing deve eseguire, dopo `set_images_lines` e prima del salvataggio finale del manifest, una fase `cleanup_manifest` che rimuove i campi `pdf_source_page` da `markdown.toc_tree`, `tables` e `images` per default; la fase deve essere bypassata quando la CLI riceve il flag `--enable-pdf-pages-ref`, mantenendo tali campi nel manifest e riportando lo stato del flag nel riepilogo parametri.
 
 ### 3.2 Funzioni
 - **CORE-REQ-001**: Il tool deve terminare con errore se il file PDF di input non esiste.

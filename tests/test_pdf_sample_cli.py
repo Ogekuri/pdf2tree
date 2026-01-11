@@ -20,7 +20,8 @@ from pdf2tree.core import (
     generate_markdown_toc_file,
     normalize_markdown_headings,
     normalize_markdown_format,
-    remove_secondary_markdown_index,
+    remove_markdown_index,
+    add_pdf_toc_to_markdown,
     select_annotation_prompt,
 )
 
@@ -50,6 +51,9 @@ TEMP_DIR_TOC_VALIDATION = ROOT / "temp" / "pdf_sample_toc_validation"
 TEMP_DIR_TOC_VALIDATION_FULL = ROOT / "temp" / "pdf_sample_toc_validation_full"
 TEMP_DIR_TOC_NORMALIZATION = ROOT / "temp" / "pdf_sample_toc_normalization"
 TEMP_DIR_CONTEXT = ROOT / "temp" / "pdf_sample_context"
+TEMP_DIR_CLEANUP_DISABLED = ROOT / "temp" / "pdf_sample_cleanup_disabled"
+TEMP_DIR_TOC_DISABLED = ROOT / "temp" / "pdf_sample_toc_disabled"
+TEMP_DIR_PAGES_REF = ROOT / "temp" / "pdf_sample_pages_ref"
 
 EXIT_OUTPUT_DIR_NOT_EMPTY = 7
 EXIT_OPENCV_MISSING = 8
@@ -350,29 +354,87 @@ def test_page_range_limits_processing(pdf_artifacts: dict[str, Path]) -> None:
     toc_nodes = manifest.get("markdown", {}).get("toc_tree", [])
     assert toc_nodes, "Il manifest deve includere la TOC serializzata"
     for node in _iter_manifest_toc_nodes(toc_nodes):
-        assert "pdf_source_page" in node, "Ogni nodo TOC deve avere il campo pdf_source_page"
+        assert "pdf_source_page" not in node, "I riferimenti pagina devono essere rimossi di default"
         assert "page" not in node, "Il vecchio campo page non deve più comparire nella TOC"
+        for field in ("start_line", "end_line", "start_char", "end_char"):
+            assert field in node, f"Il nodo TOC deve avere il campo {field}"
+        assert int(node["start_line"]) <= int(node["end_line"]), "L'intervallo di righe deve essere valido"
+        assert int(node["start_char"]) <= int(node["end_char"]), "L'intervallo di caratteri deve essere valido"
+
+    def _assert_nested_ranges(node: dict[str, Any]) -> None:
+        for child in node.get("children", []) or []:
+            assert int(node["start_line"]) <= int(child["start_line"]), "Il padre deve iniziare prima del figlio"
+            assert int(node["end_line"]) < int(child["start_line"]), "Il padre deve terminare prima dell'inizio del figlio"
+            assert int(node["start_char"]) <= int(child["start_char"]), "Il padre deve iniziare prima del figlio (caratteri)"
+            assert int(node["end_char"]) < int(child["start_char"]), "Il padre deve terminare prima del figlio (caratteri)"
+            _assert_nested_ranges(child)
+
+    for root in toc_nodes:
+        _assert_nested_ranges(root)
 
     md_files = [path for path in TEMP_DIR_N_PAGES.glob("*.md") if not path.name.endswith(".processing.md")]
     assert md_files, "Deve essere generato il Markdown anche con --n-pages"
     md_text = md_files[0].read_text(encoding="utf-8")
-    assert md_text.count("--- start of page.page_number=") == 1, "Con --n-pages 1 deve esserci un solo blocco pagina"
-    assert f"--- start of page.page_number={TEST_START_PAGE} ---" in md_text, "La pagina selezionata deve essere presente nel Markdown"
+    assert "--- start of page.page_number=" not in md_text, "I marker di pagina devono essere rimossi dalla fase di cleanup di default"
+    assert "** PDF TOC **" in md_text, "La TOC derivata dal PDF deve restare disponibile dopo il cleanup"
     match = re.search(r"page_count:\s*(\d+)", md_text)
     assert match and int(match.group(1)) == 1, "Il front matter deve riflettere il nuovo numero di pagine"
 
     for entry in manifest.get("tables", []):
-        page_no = entry.get("pdf_source_page")
-        assert page_no in (None, TEST_START_PAGE), "Le tabelle devono essere limitate alla pagina selezionata"
+        assert "pdf_source_page" not in entry, "Le tabelle non devono riportare il riferimento pagina di default"
 
     for entry in manifest.get("images", []):
-        page_no = entry.get("pdf_source_page")
-        assert page_no in (None, TEST_START_PAGE), "Le immagini non devono riferirsi a pagine successive"
+        assert "pdf_source_page" not in entry, "Le immagini non devono riportare il riferimento pagina di default"
 
     verbose_output = result.stdout + result.stderr
     assert "Processing page" in verbose_output, "La modalità verbose deve restare attiva"
     assert "[1/1]" in verbose_output, "L'avanzamento deve riflettere il limite di una pagina"
     assert f"PDF page {TEST_START_PAGE}" in verbose_output, "Il log verbose deve riportare il numero pagina originale"
+
+
+def test_pdf_pages_ref_preserved_when_enabled(pdf_artifacts: dict[str, Path]) -> None:
+    pdf_path = pdf_artifacts["with_toc"]
+    if TEMP_DIR_PAGES_REF.exists():
+        shutil.rmtree(TEMP_DIR_PAGES_REF)
+
+    cmd = _with_test_page_range([
+        "./pdf2tree.sh",
+        "--from-file",
+        str(pdf_path.relative_to(ROOT)),
+        "--to-dir",
+        str(TEMP_DIR_PAGES_REF.relative_to(ROOT)),
+        "--verbose",
+        "--post-processing",
+        "--disable-pic2tex",
+        "--disable-annotate-images",
+        "--disable-remove-small-images",
+        "--enable-pdf-pages-ref",
+    ])
+    result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, (
+        f"Esecuzione con --enable-pdf-pages-ref deve riuscire, ottenuto {result.returncode}\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+
+    manifest_path = TEMP_DIR_PAGES_REF / f"{pdf_path.stem}.json"
+    assert manifest_path.exists(), "Il manifest deve essere generato con il flag attivo"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    toc_nodes = manifest.get("markdown", {}).get("toc_tree", [])
+    assert toc_nodes, "La TOC deve essere presente nel manifest"
+    for node in _iter_manifest_toc_nodes(toc_nodes):
+        assert "pdf_source_page" in node, "Il flag deve conservare il riferimento pagina nei nodi TOC"
+        page_no = node.get("pdf_source_page")
+        assert isinstance(page_no, int) and page_no >= TEST_START_PAGE, "Il riferimento pagina deve riflettere l'intervallo selezionato"
+        assert "page" not in node, "Il vecchio campo page non deve ricomparire"
+
+    for entry in manifest.get("tables", []):
+        page_no = entry.get("pdf_source_page")
+        assert isinstance(page_no, int) and page_no >= TEST_START_PAGE, "Le tabelle devono riportare il riferimento pagina quando abilitato"
+
+    for entry in manifest.get("images", []):
+        page_no = entry.get("pdf_source_page")
+        assert isinstance(page_no, int) and page_no >= TEST_START_PAGE, "Le immagini devono riportare il riferimento pagina quando abilitato"
 
 
 def test_output_dir_must_be_empty(pdf_artifacts: dict[str, Path]) -> None:
@@ -597,7 +659,7 @@ def test_post_processing_normalizes_headings_against_pdf_toc(pdf_artifacts: dict
             page_no = int(entry[2])
         except Exception:
             continue
-        if title.lower() == "indice":
+        if title.lower() in {"indice", "toc"}:
             continue
         if page_start <= page_no <= page_end:
             pdf_titles_range.append(title)
@@ -782,7 +844,9 @@ def test_post_processing_only_requires_markdown_and_backup(pdf_artifacts: dict[s
     )
 
     restored_md = md_path.read_text(encoding="utf-8")
-    assert restored_md == md_content, "Il Markdown deve essere ripristinato dal backup prima della pipeline"
+    assert "Placeholder content for post-processing-only" in restored_md, (
+        "Il Markdown deve essere ripristinato dal backup prima di eventuali modifiche della pipeline"
+    )
 
     if TEMP_DIR_POST_ONLY.exists():
         shutil.rmtree(TEMP_DIR_POST_ONLY)
@@ -1204,6 +1268,66 @@ def test_remove_small_images_stage_can_be_disabled(pdf_artifacts: dict[str, Path
     assert any(images_dir.glob("*.png")), "I file immagine non devono essere rimossi quando la fase è disattivata"
 
 
+def test_disable_cleanup_preserves_markers(pdf_artifacts: dict[str, Path]) -> None:
+    pdf_path = pdf_artifacts["with_toc"]
+    if TEMP_DIR_CLEANUP_DISABLED.exists():
+        shutil.rmtree(TEMP_DIR_CLEANUP_DISABLED)
+
+    cmd = _with_test_page_range([
+        "./pdf2tree.sh",
+        "--from-file",
+        str(pdf_path.relative_to(ROOT)),
+        "--to-dir",
+        str(TEMP_DIR_CLEANUP_DISABLED.relative_to(ROOT)),
+        "--post-processing",
+        "--disable-cleanup",
+        "--disable-pic2tex",
+        "--disable-annotate-images",
+        "--disable-remove-small-images",
+    ])
+    result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, (
+        f"L'esecuzione con cleanup disabilitato deve riuscire, ottenuto {result.returncode}\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+
+    md_files = [path for path in TEMP_DIR_CLEANUP_DISABLED.glob("*.md") if not path.name.endswith(".processing.md")]
+    assert md_files, "Il Markdown deve essere presente nell'output"
+    md_text = md_files[0].read_text(encoding="utf-8")
+    assert "--- start of page.page_number=" in md_text, "I marker di pagina devono restare quando il cleanup è disabilitato"
+    assert re.search(r"toc", md_text, flags=re.IGNORECASE), "Il cleanup disabilitato deve preservare la TOC duplicata (anche se normalizzata)"
+
+
+def test_disable_toc_flag_skips_toc_insertion(pdf_artifacts: dict[str, Path]) -> None:
+    pdf_path = pdf_artifacts["with_toc"]
+    if TEMP_DIR_TOC_DISABLED.exists():
+        shutil.rmtree(TEMP_DIR_TOC_DISABLED)
+
+    cmd = _with_test_page_range([
+        "./pdf2tree.sh",
+        "--from-file",
+        str(pdf_path.relative_to(ROOT)),
+        "--to-dir",
+        str(TEMP_DIR_TOC_DISABLED.relative_to(ROOT)),
+        "--post-processing",
+        "--disable-toc",
+        "--disable-pic2tex",
+        "--disable-annotate-images",
+        "--disable-remove-small-images",
+    ], start_page=3)
+    result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, (
+        f"Esecuzione con TOC disabilitata deve riuscire, ottenuto {result.returncode}\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+
+    md_files = [path for path in TEMP_DIR_TOC_DISABLED.glob("*.md") if not path.name.endswith(".processing.md")]
+    assert md_files, "Il Markdown deve essere generato anche con TOC disabilitata"
+    md_text = md_files[0].read_text(encoding="utf-8")
+    assert "--- start of page.page_number=" not in md_text, "Il cleanup deve comunque rimuovere i marker di pagina"
+    assert "** PDF TOC **" not in md_text, "Con --disable-toc la TOC Markdown non deve essere inserita"
+
+
 def test_write_prompts_creates_file_and_exits() -> None:
     if TEMP_DIR_PROMPTS.exists():
         shutil.rmtree(TEMP_DIR_PROMPTS)
@@ -1268,6 +1392,9 @@ def test_select_annotation_prompt_rules() -> None:
         gemini_module="mod",
         test_mode=False,
         disable_remove_small_images=False,
+        disable_cleanup=False,
+        disable_toc=False,
+        enable_pdf_pages_ref=False,
         min_size_x=1,
         min_size_y=1,
         prompt_equation="EQ",
@@ -1281,25 +1408,24 @@ def test_select_annotation_prompt_rules() -> None:
     assert select_annotation_prompt(False, False, cfg) == "UN", "Senza Pix2Tex deve usare prompt_uncertain per immagini"
 
 
-def test_remove_secondary_markdown_index() -> None:
-    duplicate = """## Indice
-- Introduzione Stravagante (pag. 3)
-
---- start of page.page_number=3 ---
-## **Indice**
-|**1**|**Introduzione Stravagante**|**Introduzione Stravagante**|**2**|
---- end of page.page_number=3 ---
-## Contenuto Primario
+def test_remove_markdown_index() -> None:
+    duplicate = """Prefazione iniziale
+--- start of page.page_number=1 ---
+## Sommario provvisorio
+Test di sommario
+--- end of page.page_number=1 ---
+## Introduzione Stravagante
+Contenuto Primario
 """
-    cleaned = remove_secondary_markdown_index(duplicate)
-    assert "## **Indice**" not in cleaned
-    assert "## Indice" in cleaned
-    assert "## Contenuto Primario" in cleaned
-    assert "--- start of page.page_number=3 ---" in cleaned
-    assert "--- end of page.page_number=3 ---" in cleaned
-    between = cleaned.split("--- start of page.page_number=3 ---", 1)[1]
-    between_content = between.split("--- end of page.page_number=3 ---", 1)[0]
-    assert not between_content.strip(), "Content between the markers should be removed"
+    pdf_toc = [(1, "Introduzione Stravagante", 1)]
+    cleaned = remove_markdown_index(duplicate, pdf_toc)
+    assert "Prefazione iniziale" not in cleaned
+    assert "## Sommario provvisorio" not in cleaned
+    assert "## Introduzione Stravagante" in cleaned
+    assert "--- start of page.page_number=1 ---" in cleaned
+    assert "--- end of page.page_number=1 ---" in cleaned
+    section = cleaned.split("--- end of page.page_number=1 ---", 1)[-1]
+    assert "## Introduzione Stravagante" in section
 
 
 def test_normalize_markdown_format_br_to_newline() -> None:
@@ -1309,7 +1435,7 @@ def test_normalize_markdown_format_br_to_newline() -> None:
 
 
 def test_normalize_markdown_headings_inserts_hashes() -> None:
-    source = """## Indice
+    source = """** PDF TOC **
 ## **Introduzione Stravagante**
 ## **1.1 Motivazioni improbabili**
 """
@@ -1317,13 +1443,12 @@ def test_normalize_markdown_headings_inserts_hashes() -> None:
     normalized = normalize_markdown_headings(source, headings)
     assert "## Introduzione Stravagante" in normalized
     assert "### 1.1 Motivazioni improbabili" in normalized
-    assert "- [Introduzione Stravagante](#introduzione-stravagante)" in normalized
-    assert "  - [1.1 Motivazioni improbabili](#11-motivazioni-improbabili)" in normalized
+    assert "- [Introduzione Stravagante](#introduzione-stravagante)" not in normalized
 
 
 def test_generate_markdown_toc_file_writes_anchor(tmp_path: Path) -> None:
     md_path = tmp_path / "doc.md"
-    md_content = """## Indice
+    md_content = """** PDF TOC **
 ## Introduzione Stravagante (pag. 3)
 ### 1.1 Motivazioni improbabili (pag. 3)
 """
@@ -1333,3 +1458,30 @@ def test_generate_markdown_toc_file_writes_anchor(tmp_path: Path) -> None:
     assert any(line.strip() == "- [Introduzione Stravagante](#introduzione-stravagante) (pag. 3)" for line in toc_lines)
     assert any(line.strip() == "- [1.1 Motivazioni improbabili](#11-motivazioni-improbabili) (pag. 3)" for line in toc_lines)
     assert headings == [(2, "Introduzione Stravagante"), (3, "1.1 Motivazioni improbabili")]
+
+
+def test_add_pdf_toc_to_markdown_inserts_hierarchical_toc() -> None:
+    md = """--- start of page.page_number=1 ---
+## Introduzione Stravagante
+Contenuto
+"""
+    pdf_toc = [(1, "Introduzione Stravagante", 1), (2, "1.1 Motivazioni improbabili", 1)]
+    updated = add_pdf_toc_to_markdown(md, pdf_toc)
+    lines = updated.splitlines()
+    assert lines[0].strip() == "--- start of page.page_number=1 ---"
+    assert "** PDF TOC **" in updated
+    assert "- [Introduzione Stravagante](#introduzione-stravagante)" in updated
+    assert "  - [1.1 Motivazioni improbabili](#11-motivazioni-improbabili)" in updated
+
+
+def test_add_pdf_toc_to_markdown_normalizes_pdf_toc_heading() -> None:
+    md = """--- start of page.page_number=1 ---
+## TOC
+Contenuto fittizio
+"""
+    pdf_toc = [(1, "Introduzione Stravagante", 1)]
+    updated = add_pdf_toc_to_markdown(md, pdf_toc)
+
+    lines = updated.splitlines()
+    assert lines[1].strip() == "** PDF TOC **", "L'intestazione TOC deve essere normalizzata al formato in grassetto"
+    assert "## TOC" not in updated, "Varianti legacy di TOC devono essere normalizzate al formato in grassetto"

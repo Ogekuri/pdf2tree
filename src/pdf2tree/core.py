@@ -290,6 +290,9 @@ class PostProcessingConfig:
     gemini_module: str
     test_mode: bool
     disable_remove_small_images: bool
+    disable_cleanup: bool
+    disable_toc: bool
+    enable_pdf_pages_ref: bool
     min_size_x: int
     min_size_y: int
     prompt_equation: str
@@ -371,9 +374,12 @@ def print_parameter_summary(
 
     pix2tex_active = bool(post_config.enable_pix2tex and not post_config.disable_pix2tex)
     remove_small_active = not post_config.disable_remove_small_images
+    cleanup_active = not post_config.disable_cleanup
+    toc_active = not post_config.disable_toc
     annotate_images_active = bool(post_config.annotate_images)
     annotate_equations_active = bool(post_config.annotate_equations)
     gemini_key_present = bool(post_config.gemini_api_key)
+    pdf_pages_ref_active = bool(post_config.enable_pdf_pages_ref)
 
     lines = [
         "Parameter summary:",
@@ -388,6 +394,9 @@ def print_parameter_summary(
         f"  - Vector extraction: {_format_flag(vector_images_enabled)}",
         f"  - Post-processing: {_format_flag(post_processing_active)}",
         f"  - Remove small images: {_format_flag(remove_small_active)} (min {post_config.min_size_x}x{post_config.min_size_y}px)",
+        f"  - Cleanup: {_format_flag(cleanup_active)}",
+        f"  - Add TOC: {_format_flag(toc_active)}",
+        f"  - PDF page refs: {_format_flag(pdf_pages_ref_active)}",
         f"  - Pix2Tex: {_format_flag(pix2tex_active)} (threshold {post_config.equation_min_len})",
         f"  - Annotate images: {_format_flag(annotate_images_active)}",
         f"  - Annotate equations: {_format_flag(annotate_equations_active)}",
@@ -736,11 +745,11 @@ def yaml_front_matter(metadata: dict, source_path: Path, page_count: int) -> str
 
 
 def build_toc_markdown(toc: List[List[Any]]) -> str:
-    """Genera la sezione Markdown dell'indice con rientri per livello."""
+    """Genera la sezione Markdown della TOC con rientri per livello."""
 
     if not toc:
         return ""
-    lines: List[str] = ["## Indice\n"]
+    lines: List[str] = ["** PDF TOC **\n"]
     for level, title, page_no in toc:
         indent = "  " * max(0, int(level) - 1)
         safe_title = str(title).strip()
@@ -1663,68 +1672,83 @@ def remove_small_images_phase(
     return cleaned_md, manifest
 
 
-def remove_secondary_markdown_index(md_text: str) -> str:
-    """Rimuove un secondo indice Markdown (generato dal PDF) mantenendo solo l'indice sintetico."""
+def remove_markdown_index(md_text: str, pdf_toc: List[Tuple[int, str, Optional[int]]]) -> str:
+    """Rimuove il contenuto iniziale fino alla prima voce del pdf_toc mantenendo i marker di pagina."""
 
-    lines = md_text.splitlines()
-    pattern = re.compile(r"^##\s+[*_]*Indice[*_]*\s*$", re.IGNORECASE)
-    toc_starts: List[int] = []
-    for idx, raw in enumerate(lines):
-        if pattern.match(raw.strip()):
-            toc_starts.append(idx)
-    if len(toc_starts) < 2:
+    if not md_text or not pdf_toc:
         return md_text
 
-    second_start = toc_starts[1]
-    end_idx = second_start + 1
-    while end_idx < len(lines):
-        stripped = lines[end_idx].strip()
-        if PAGE_END_MARKER_CAPTURE_RE.match(stripped):
-            break
-        if stripped.startswith("--- start of page.page_number="):
-            break
-        if stripped.startswith("##") and not pattern.match(stripped):
-            break
-        end_idx += 1
+    first_title = _normalize_title_for_toc(str(pdf_toc[0][1]).strip()) if len(pdf_toc[0]) >= 2 else ""
+    if not first_title:
+        return md_text
 
-    normalized = lines[:second_start] + lines[end_idx:]
+    heading_re = re.compile(r"^(?P<prefix>\s*)(?P<hashes>#{1,6})\s+(?P<title>.+?)\s*$")
 
-    def _clean_duplicate_page_block(page_lines: List[str]) -> List[str]:
-        cleaned: List[str] = []
-        idx = 0
-        while idx < len(page_lines):
-            current = page_lines[idx]
-            start_match = PAGE_START_MARKER_CAPTURE_RE.match(current.strip())
-            if start_match:
-                page_number = start_match.group(1)
-                block: List[str] = []
-                j = idx + 1
-                found_end = False
-                while j < len(page_lines):
-                    candidate = page_lines[j]
-                    end_match = PAGE_END_MARKER_CAPTURE_RE.match(candidate.strip())
-                    if end_match and end_match.group(1) == page_number:
-                        found_end = True
-                        break
-                    block.append(candidate)
-                    j += 1
-                cleaned.append(current)
-                if not found_end:
-                    idx += 1
-                    continue
-                duplicate_present = any(pattern.match(line.strip()) for line in block)
-                if not duplicate_present:
-                    cleaned.extend(block)
-                cleaned.append(page_lines[j])
-                idx = j + 1
-                continue
-            cleaned.append(current)
+    lines = md_text.splitlines()
+    output: List[str] = []
+    keep_content = False
+    matched_heading = False
+
+    # Preserva l'eventuale front matter YAML iniziale.
+    idx = 0
+    if lines and lines[0].strip() == "---":
+        output.append(lines[0])
+        idx = 1
+        while idx < len(lines):
+            output.append(lines[idx])
+            if lines[idx].strip() == "---":
+                idx += 1
+                break
             idx += 1
-        return cleaned
+    else:
+        idx = 0
 
-    cleaned_lines = _clean_duplicate_page_block(normalized)
+    for line in lines[idx:]:
+        stripped = line.strip()
+
+        if PAGE_START_MARKER_CAPTURE_RE.match(stripped) or PAGE_END_MARKER_CAPTURE_RE.match(stripped):
+            output.append(line)
+            continue
+
+        if not keep_content:
+            match = heading_re.match(line)
+            if match:
+                candidate = _normalize_title_for_toc(match.group("title"))
+                if candidate == first_title:
+                    keep_content = True
+                    matched_heading = True
+                    output.append(line)
+                    continue
+            continue
+
+        output.append(line)
+
+    if not matched_heading:
+        return md_text
+
+    result = "\n".join(output)
+    if md_text.endswith("\n") and not result.endswith("\n"):
+        result += "\n"
+    return result
+
+
+def cleanup_markdown(md_text: str, pdf_headings: Optional[List[Tuple[int, str, Optional[int]]]] = None) -> str:
+    """Pulisce il Markdown degradando le intestazioni fuori TOC e rimuovendo i marker di pagina."""
+
+    if not md_text:
+        return md_text
+
+    base_text = clean_markdown_headings(md_text, pdf_headings or []) if pdf_headings else md_text
+
+    cleaned_lines: List[str] = []
+    for raw in base_text.splitlines():
+        stripped = raw.strip()
+        if PAGE_START_MARKER_CAPTURE_RE.match(stripped) or PAGE_END_MARKER_CAPTURE_RE.match(stripped):
+            continue
+        cleaned_lines.append(raw)
+
     result = "\n".join(cleaned_lines)
-    if md_text.endswith("\n"):
+    if base_text.endswith("\n") and not result.endswith("\n"):
         result += "\n"
     return result
 
@@ -1764,7 +1788,7 @@ def _scan_markdown_for_toc_entries(md_text: str) -> List[Tuple[str, int, str, st
             title_clean = re.sub(r"^\d+(?:\.\d+)*\s+", "", title_clean).strip()
             if not title_display:
                 continue
-            if title_clean.lower() == "indice" or title_clean.lower().startswith("capitolo "):
+            if title_clean.lower() in {"indice", "toc"} or title_clean.lower().startswith("capitolo "):
                 continue
             toc_sequence.append(("heading", level, title_display, page_note))
             continue
@@ -1814,33 +1838,6 @@ def normalize_markdown_headings(md_text: str, toc_headings: List[Tuple[Any, ...]
                 lines[idx] = heading_line
                 search_pos = idx + 1
                 break
-
-    index_heading_re = re.compile(r"^##\s+indice\s*$", re.IGNORECASE)
-    index_start: Optional[int] = None
-    for idx, raw in enumerate(lines):
-        if index_heading_re.match(raw.strip()):
-            index_start = idx
-            break
-
-    if index_start is not None and normalized_toc:
-        end_idx = index_start + 1
-        while end_idx < len(lines):
-            stripped = lines[end_idx].strip()
-            if index_heading_re.match(stripped):
-                break
-            if stripped.startswith("##") or PAGE_START_MARKER_CAPTURE_RE.match(stripped):
-                break
-            end_idx += 1
-
-        toc_lines: List[str] = ["## Indice", ""]
-        for level, title, page in normalized_toc:
-            indent = "  " * max(0, level - 1)
-            anchor = _slugify_markdown_heading(title)
-            page_suffix = f" (pag. {page})" if page is not None else ""
-            toc_lines.append(f"{indent}- [{title}](#{anchor}){page_suffix}")
-        toc_lines.append("")
-
-        lines = lines[:index_start] + toc_lines + lines[end_idx:]
 
     result = "\n".join(lines)
     if md_text.endswith("\n"):
@@ -1892,6 +1889,54 @@ def clean_markdown_headings(md_text: str, pdf_headings: List[Tuple[int, str, Opt
     return result
 
 
+def add_pdf_toc_to_markdown(md_text: str, pdf_headings: List[Tuple[int, str, Optional[int]]]) -> str:
+    """Inserisce una TOC Markdown derivata dal pdf_toc all'inizio del documento."""
+
+    if not md_text or not pdf_headings:
+        return md_text
+
+    def _normalize_toc_heading_variants(content: str) -> str:
+        """Normalizza intestazioni TOC alternative sul formato canonico in grassetto."""
+
+        lines = content.splitlines()
+        pattern = re.compile(
+            r"^\s*(?:#{1,6}\s*)?(?:\*{0,2}\s*)?(?:pdf\s+toc|toc)\s*(?:\*{0,2}\s*)?$",
+            re.IGNORECASE,
+        )
+        normalized: List[str] = []
+        for line in lines:
+            if pattern.match(line.strip()):
+                normalized.append("** PDF TOC **")
+            else:
+                normalized.append(line)
+        result = "\n".join(normalized)
+        if content.endswith("\n") and not result.endswith("\n"):
+            result += "\n"
+        return result
+
+    md_text = _normalize_toc_heading_variants(md_text)
+
+    toc_lines: List[str] = ["** PDF TOC **", ""]
+    for level, title, _ in pdf_headings:
+        indent = "  " * max(0, int(level) - 1)
+        anchor = _slugify_markdown_heading(title)
+        toc_lines.append(f"{indent}- [{title}](#{anchor})")
+    toc_lines.append("")
+
+    lines = md_text.splitlines()
+    insert_at = 0
+    for idx, raw in enumerate(lines):
+        if PAGE_START_MARKER_CAPTURE_RE.match(raw.strip()):
+            insert_at = idx + 1
+            break
+
+    new_lines = lines[:insert_at] + toc_lines + lines[insert_at:]
+    result = "\n".join(new_lines)
+    if md_text.endswith("\n") and not result.endswith("\n"):
+        result += "\n"
+    return result
+
+
 def normalize_markdown_format(md_text: str) -> str:
     """Normalizza il formato Markdown sostituendo elementi HTML come <br> con newline."""
 
@@ -1924,7 +1969,7 @@ def generate_markdown_toc_file(md_text: str, md_path: Path, out_dir: Path) -> Tu
     return toc_path, heading_entries
 
 
-def normalize_markdown_file(pdf_path: Path, md_path: Path, out_dir: Path) -> Tuple[str, List[Tuple[int, str]], List[List[Any]], Path]:
+def normalize_markdown_file(pdf_path: Path, md_path: Path, out_dir: Path, *, add_toc: bool = True) -> Tuple[str, List[Tuple[int, str]], List[List[Any]], Path, List[Tuple[int, str, Optional[int]]]]:
     """Normalizza il Markdown ripristinato usando la TOC del PDF e rigenera il file .toc."""
 
     try:
@@ -1961,19 +2006,20 @@ def normalize_markdown_file(pdf_path: Path, md_path: Path, out_dir: Path) -> Tup
                 page_no = int(entry[2])
             except Exception:
                 page_no = None
-        if not title or title.lower() == "indice":
+        if not title or title.lower() in {"indice", "toc"}:
             continue
         pdf_headings.append((level, title, page_no))
 
     md_text = md_path.read_text(encoding="utf-8")
     md_text = normalize_markdown_format(md_text)
-    md_text = remove_secondary_markdown_index(md_text)
+    md_text = remove_markdown_index(md_text, pdf_headings)
     normalized_md = normalize_markdown_headings(md_text, pdf_headings)
     cleaned_md = clean_markdown_headings(normalized_md, pdf_headings)
-    safe_write_text(md_path, cleaned_md)
-    toc_path, toc_headings = generate_markdown_toc_file(cleaned_md, md_path, out_dir)
+    final_md = add_pdf_toc_to_markdown(cleaned_md, pdf_headings) if add_toc else cleaned_md
+    safe_write_text(md_path, final_md)
+    toc_path, toc_headings = generate_markdown_toc_file(final_md, md_path, out_dir)
 
-    return cleaned_md, toc_headings, toc_raw, toc_path
+    return final_md, toc_headings, toc_raw, toc_path, pdf_headings
 
 
 def _normalize_title_for_toc(title: str) -> str:
@@ -2012,7 +2058,7 @@ def validate_markdown_toc_against_pdf(pdf_path: Path, headings_md: List[Tuple[in
         except Exception:
             continue
         title = str(entry[1]).strip()
-        if title.lower() == "indice":
+        if title.lower() in {"indice", "toc"}:
             continue
         pdf_headings.append((level, title))
 
@@ -2472,6 +2518,31 @@ def populate_images(manifest: Dict[str, Any]) -> Dict[str, Any]:
     return manifest
 
 
+def cleanup_manifest(manifest: Dict[str, Any], keep_pdf_pages_ref: bool) -> Dict[str, Any]:
+    """Rimuove i campi `pdf_source_page` dal manifest salvo abilitazione esplicita."""
+
+    if keep_pdf_pages_ref:
+        return manifest
+
+    markdown = manifest.get("markdown") or {}
+    toc_nodes = markdown.get("toc_tree") or []
+
+    def _strip_pdf_page(nodes: List[Dict[str, Any]]) -> None:
+        for node in nodes:
+            node.pop("pdf_source_page", None)
+            _strip_pdf_page(node.get("children") or [])
+
+    _strip_pdf_page(toc_nodes)
+
+    for table in manifest.get("tables") or []:
+        table.pop("pdf_source_page", None)
+
+    for image in manifest.get("images") or []:
+        image.pop("pdf_source_page", None)
+
+    return manifest
+
+
 def _build_line_index(md_text: str) -> Tuple[List[str], List[int], List[int]]:
     """Costruisce gli indici di riga e byte sulla base del Markdown attuale."""
 
@@ -2489,25 +2560,39 @@ def _build_line_index(md_text: str) -> Tuple[List[str], List[int], List[int]]:
     return lines, line_starts, newline_lens
 
 
-def _line_byte_range(
+def _line_char_range(
     line_starts: List[int], newline_lens: List[int], lines: List[str], start_idx: int, end_idx: int
 ) -> Tuple[int, int]:
-    """Calcola l'intervallo di byte corrispondente a un blocco di righe."""
+    """Calcola l'intervallo di caratteri (offset byte invariato) per un blocco di righe."""
 
-    start_byte = line_starts[start_idx]
+    start_char = line_starts[start_idx]
     end_offset = line_starts[end_idx] + len(lines[end_idx]) + newline_lens[end_idx]
-    end_byte = end_offset - 1 if end_offset > start_byte else start_byte
-    return start_byte, end_byte
+    end_char = end_offset - 1 if end_offset > start_char else start_char
+    return start_char, end_char
 
 
 def set_toc_lines(manifest: Dict[str, Any], md_text: str) -> Dict[str, Any]:
-    """Annota i nodi TOC con i limiti di riga e byte del Markdown."""
+    """Annota i nodi TOC assegnando intervalli limitati alla singola voce, senza includere i figli.
+
+    Se le intestazioni reali (#, ##, ...) non sono presenti (es. range pagine limitato),
+    ricorre ai link della TOC Markdown inserita ("- [Titolo](#ancora)") per ancorare i
+    nodi e mantenere comunque gli intervalli di righe/byte."""
 
     lines, line_starts, newline_lens = _build_line_index(md_text)
     if not lines:
         return manifest
 
     toc_nodes = (manifest.get("markdown") or {}).get("toc_tree") or []
+    if not toc_nodes:
+        return manifest
+
+    heading_re = re.compile(r"^#{1,6}\s+(.+?)\s*$")
+    toc_link_re = re.compile(r"^\s*-\s*\[(.+?)\]\([^)]*\)\s*$")
+
+    start_map: Dict[int, int] = {}
+    end_map: Dict[int, int] = {}
+    total_lines = len(lines)
+
     flattened: List[Dict[str, Any]] = []
 
     def _collect(nodes: List[Dict[str, Any]]) -> None:
@@ -2519,41 +2604,62 @@ def set_toc_lines(manifest: Dict[str, Any], md_text: str) -> Dict[str, Any]:
     if not flattened:
         return manifest
 
-    heading_re = re.compile(r"^#{1,6}\s+(.+?)\s*$")
     positions: List[Tuple[Dict[str, Any], int]] = []
+
+    def _find_line_for_title(target_norm: str, start_from: int) -> Optional[int]:
+        """Cerca prima un'intestazione reale, poi un link TOC se assente."""
+
+        for idx in range(start_from, len(lines)):
+            match = heading_re.match(lines[idx])
+            if not match:
+                continue
+            candidate = _normalize_title_for_toc(match.group(1))
+            if candidate == target_norm:
+                return idx
+
+        for idx in range(start_from, len(lines)):
+            match = toc_link_re.match(lines[idx])
+            if not match:
+                continue
+            candidate = _normalize_title_for_toc(match.group(1))
+            if candidate == target_norm:
+                return idx
+
+        return None
+
     search_start = 0
     for node in flattened:
         title = str(node.get("title") or "").strip()
         if not title:
             continue
         target_norm = _normalize_title_for_toc(title)
-        found_idx: Optional[int] = None
-        for idx in range(search_start, len(lines)):
-            match = heading_re.match(lines[idx])
-            if not match:
-                continue
-            candidate = _normalize_title_for_toc(match.group(1))
-            if candidate == target_norm:
-                found_idx = idx
-                search_start = idx + 1
-                break
+        found_idx = _find_line_for_title(target_norm, search_start)
         if found_idx is not None:
             positions.append((node, found_idx))
+            search_start = found_idx + 1
 
-    total_lines = len(lines)
     if not positions:
         return manifest
 
+    # Ordina per posizione trovata nel Markdown così l'end di ciascuna voce termina
+    # immediatamente prima della voce successiva (o a fine file per l'ultima).
+    positions.sort(key=lambda item: item[1])
+
     for index, (node, start_idx) in enumerate(positions):
+        start_map[id(node)] = start_idx
         next_start_idx = positions[index + 1][1] if index + 1 < len(positions) else total_lines
         end_idx = next_start_idx - 1 if next_start_idx > 0 else total_lines - 1
         if end_idx < start_idx:
             end_idx = start_idx
-        start_byte, end_byte = _line_byte_range(line_starts, newline_lens, lines, start_idx, end_idx)
+        end_map[id(node)] = end_idx
+
+    for node, start_idx in positions:
+        end_idx = end_map.get(id(node), start_idx)
+        start_char, end_char = _line_char_range(line_starts, newline_lens, lines, start_idx, end_idx)
         node["start_line"] = start_idx + 1
         node["end_line"] = end_idx + 1
-        node["start_byte"] = start_byte
-        node["end_byte"] = end_byte
+        node["start_char"] = start_char
+        node["end_char"] = end_char
 
     return manifest
 
@@ -2577,11 +2683,45 @@ def set_tables_lines(manifest: Dict[str, Any], md_text: str) -> Dict[str, Any]:
             continue
         start_idx = min(hit_lines)
         end_idx = max(hit_lines)
-        start_byte, end_byte = _line_byte_range(line_starts, newline_lens, lines, start_idx, end_idx)
+
+        table_heading_re = re.compile(r"^#{3,6}\s+tabella", re.IGNORECASE)
+        table_block_marker_re = re.compile(r"^###\s+tabelle", re.IGNORECASE)
+
+        # Estende l'intervallo verso l'alto per includere il blocco tabellare immediatamente precedente
+        # ai link [Markdown]/[CSV], fermandosi a separatori pagina o a contenuto non correlato.
+        expanded_start = start_idx
+        seen_block = False
+        for i in range(start_idx - 1, -1, -1):
+            stripped = lines[i].strip()
+
+            if PAGE_START_MARKER_CAPTURE_RE.match(stripped) or PAGE_END_MARKER_CAPTURE_RE.match(stripped):
+                break
+
+            is_heading = bool(table_heading_re.match(stripped) or table_block_marker_re.match(stripped))
+            is_table_row = "|" in stripped and not stripped.startswith("---")
+            is_fallback_marker = stripped.lower().startswith("<!-- extracted_tables_fallback")
+
+            if is_heading or is_table_row or is_fallback_marker:
+                expanded_start = i
+                seen_block = True
+                continue
+
+            if stripped == "":
+                if seen_block:
+                    expanded_start = i
+                    continue
+                break
+
+            if seen_block:
+                break
+            break
+
+        start_idx = expanded_start
+        start_char, end_char = _line_char_range(line_starts, newline_lens, lines, start_idx, end_idx)
         table["start_line"] = start_idx + 1
         table["end_line"] = end_idx + 1
-        table["start_byte"] = start_byte
-        table["end_byte"] = end_byte
+        table["start_char"] = start_char
+        table["end_char"] = end_char
 
     return manifest
 
@@ -2628,11 +2768,11 @@ def set_images_lines(manifest: Dict[str, Any], md_text: str) -> Dict[str, Any]:
             continue
         start_idx = min(candidates)
         end_idx = max(candidates)
-        start_byte, end_byte = _line_byte_range(line_starts, newline_lens, lines, start_idx, end_idx)
+        start_char, end_char = _line_char_range(line_starts, newline_lens, lines, start_idx, end_idx)
         image["start_line"] = start_idx + 1
         image["end_line"] = end_idx + 1
-        image["start_byte"] = start_byte
-        image["end_byte"] = end_byte
+        image["start_char"] = start_char
+        image["end_char"] = end_char
 
     return manifest
 
@@ -3159,7 +3299,9 @@ def run_post_processing_pipeline(
     except Exception as exc:
         raise RuntimeError(f"Unable to restore Markdown from backup {backup_path}: {exc}") from exc
 
-    normalized_md_text, toc_headings, toc_raw, toc_path = normalize_markdown_file(pdf_path, md_path, out_dir)
+    normalized_md_text, toc_headings, toc_raw, toc_path, pdf_headings = normalize_markdown_file(
+        pdf_path, md_path, out_dir, add_toc=not config.disable_toc
+    )
     normalized_md_text = _save_markdown(normalized_md_text)
 
     toc_mismatch = False
@@ -3221,6 +3363,12 @@ def run_post_processing_pipeline(
         )
         updated_md = _save_markdown(updated_md)
 
+    if not config.disable_cleanup:
+        updated_md = cleanup_markdown(updated_md, pdf_headings)
+        updated_md = _save_markdown(updated_md)
+    elif config.verbose:
+        LOG.info("Cleanup disabled via --disable-cleanup flag; Markdown markers preserved.")
+
     updated_manifest = generate_item_ids(updated_manifest)
     updated_manifest = referring_toc(updated_manifest)
     updated_manifest = referring_tables(updated_manifest)
@@ -3231,6 +3379,8 @@ def run_post_processing_pipeline(
     updated_manifest = set_toc_lines(updated_manifest, updated_md)
     updated_manifest = set_tables_lines(updated_manifest, updated_md)
     updated_manifest = set_images_lines(updated_manifest, updated_md)
+
+    updated_manifest = cleanup_manifest(updated_manifest, config.enable_pdf_pages_ref)
 
     safe_write_text(manifest_path, json.dumps(updated_manifest, ensure_ascii=False, indent=2) + "\n")
 
@@ -3600,6 +3750,12 @@ def main() -> int:
     ap.add_argument("--to-dir", help="Output directory")
     ap.add_argument("--verbose", action="store_true", help="Verbose progress logs")
     ap.add_argument("--debug", action="store_true", help="Debug logs + extra artifacts")
+    ap.add_argument(
+        "--version",
+        "--ver",
+        action="store_true",
+        help="Print the program version and exit",
+    )
     ap.add_argument("--header", type=float, default=0.0, help="Header margin in mm to ignore (default: 0)")
     ap.add_argument("--footer", type=float, default=0.0, help="Footer margin in mm to ignore (default: 0)")
     ap.add_argument(
@@ -3649,6 +3805,21 @@ def main() -> int:
         help="Disable the remove-small-images post-processing phase",
     )
     ap.add_argument(
+        "--enable-pdf-pages-ref",
+        action="store_true",
+        help="Keep pdf_source_page fields in the final manifest instead of removing them during cleanup",
+    )
+    ap.add_argument(
+        "--disable-cleanup",
+        action="store_true",
+        help="Disable the cleanup step that removes page markers before manifest enrichment",
+    )
+    ap.add_argument(
+        "--disable-toc",
+        action="store_true",
+        help="Disable insertion of the Markdown TOC rebuilt from the PDF TOC during post-processing",
+    )
+    ap.add_argument(
         "--equation-min-len",
         type=int,
         default=5,
@@ -3695,6 +3866,10 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    if args.version:
+        print(program_version())
+        return 0
+
     setup_logging(args.verbose, args.debug)
 
     if args.write_prompts:
@@ -3708,7 +3883,8 @@ def main() -> int:
         return 0
 
     if not args.from_file or not args.to_dir:
-        LOG.error("Options --from-file and --to-dir are required unless --write-prompts is used")
+        ap.print_help()
+        LOG.error("Options --from-file and --to-dir are required unless --write-prompts or --version/--ver is used")
         return EXIT_INVALID_ARGS
 
     if args.post_processing and args.post_processing_only:
@@ -3781,6 +3957,9 @@ def main() -> int:
         gemini_module=str(gemini_module or "google.genai"),
         test_mode=is_test_mode(),
         disable_remove_small_images=bool(args.disable_remove_small_images),
+        disable_cleanup=bool(args.disable_cleanup),
+        disable_toc=bool(args.disable_toc),
+        enable_pdf_pages_ref=bool(getattr(args, "enable_pdf_pages_ref", False)),
         min_size_x=int(args.min_size_x),
         min_size_y=int(args.min_size_y),
         prompt_equation=prompts_cfg["prompt_equation"],

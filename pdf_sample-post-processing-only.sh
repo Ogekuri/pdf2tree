@@ -4,11 +4,11 @@
 
 # Verifica se la variabile GEMINI_API_KEY è definita e non vuota
 if [ -n "$GEMINI_API_KEY" ]; then
-    echo "[INFO] GEMINI_API_KEY trovata. Esecuzione di pippo con opzione --pluto."
-    echo "./pdf2tree.sh --from-file pdf_sample/pdf_sample.pdf --to-dir temp/pdf_sample_test/ --post-processing-only --verbose --debug --header 8 --footer 10"
-    ./pdf2tree.sh --from-file pdf_sample/pdf_sample.pdf --to-dir temp/pdf_sample_test/ --post-processing-only --verbose --debug --header 8 --footer 10
+    echo "[INFO] GEMINI_API_KEY=$GEMINI_API_KEY."
+    echo ./pdf2tree.sh --from-file pdf_sample/pdf_sample.pdf --to-dir temp/pdf_sample_test/ --post-processing-only --disable-toc --verbose --debug --header 8 --footer 12
+    ./pdf2tree.sh --from-file pdf_sample/pdf_sample.pdf --to-dir temp/pdf_sample_test/ --post-processing-only --disable-toc --verbose --debug --header 8 --footer 12
 else
-    echo "[WARNING] GEMINI_API_KEY non definita. Esecuzione di pippo semplice."
-    echo "./pdf2tree.sh --from-file pdf_sample/pdf_sample.pdf --to-dir temp/pdf_sample_test/ --post-processing-only --disable-annotate-images --verbose --debug --header 8 --footer 10"
-    ./pdf2tree.sh --from-file pdf_sample/pdf_sample.pdf --to-dir temp/pdf_sample_test/ --post-processing-only --disable-annotate-images --verbose --debug --header 8 --footer 10
+    echo '[WARNING] GEMINI_API_KEY non definita. Aggiungerla con GEMINI_API_KEY=$(cat .gemini-api-key) ./pdf2tree.sh ...'
+    echo ./pdf2tree.sh --from-file pdf_sample/pdf_sample.pdf --to-dir temp/pdf_sample_test/ --post-processing-only --disable-annotate-images --disable-toc --verbose --debug --header 8 --footer 12
+    ./pdf2tree.sh --from-file pdf_sample/pdf_sample.pdf --to-dir temp/pdf_sample_test/ --post-processing-only --disable-annotate-images --disable-toc --verbose --debug --header 8 --footer 12
 fi

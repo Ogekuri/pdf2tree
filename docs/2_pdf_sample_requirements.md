@@ -1,7 +1,7 @@
 ---
 title: "Requisiti pdf_sample"
 description: Specifica dei requisiti software
-date: "2026-01-05"
+date: "2026-01-07"
 author: "Codex"
 scope:
   paths:
@@ -13,14 +13,14 @@ tags: ["markdown", "requirements", "example"]
 ---
 
 # Requisiti pdf_sample
-**Versione**: 0.4
+**Versione**: 0.7
 **Autore**: Codex  
-**Data**: 2026-01-05
+**Data**: 2026-01-07
 
-## Indice
+## TOC
 <!-- TOC -->
 - [Requisiti pdf\_sample](#requisiti-pdf_sample)
-  - [Indice](#indice)
+  - [TOC](#toc)
   - [Storico revisioni](#storico-revisioni)
   - [1. Introduzione](#1-introduzione)
     - [1.1 Regole del documento](#11-regole-del-documento)
@@ -36,10 +36,13 @@ tags: ["markdown", "requirements", "example"]
 ## Storico revisioni
 | Data | Versione | Motivo e descrizione della modifica |
 |------|----------|-------------------------------------|
-| 2026-01-05 | 0.4 | Rifinito il PDF di esempio affinché esponga un indice duplicato e intestazioni grassetto per validare la normalizzazione Markdown nel post-processing |
 | 2026-01-02 | 0.1 | Bozza iniziale basata sul sorgente |
 | 2026-01-14 | 0.2 | Aggiunta requisito compilazione doppia con PDF con/ senza TOC partendo solo dal sorgente |
 | 2026-01-04 | 0.3 | Vincolata la doppia compilazione unica per sessione di test condivisa dalla suite |
+| 2026-01-05 | 0.4 | Rifinito il PDF di esempio affinché esponga un indice duplicato e intestazioni grassetto per validare la normalizzazione Markdown nel post-processing |
+| 2026-01-07 | 0.5 | Allineata l'intestazione dell'indice a "TOC" per rispecchiare il PDF |
+| 2026-01-07 | 0.6 | L'indice inserito/normalizzato nel Markdown deve utilizzare l'intestazione `## TOC` senza formati alternativi |
+| 2026-01-07 | 0.7 | L'indice inserito/normalizzato nel Markdown deve utilizzare l'intestazione `** PDF TOC **` al posto di `## TOC` |
 
 ## 1. Introduzione
 Questo documento definisce i requisiti del progetto pdf_sample. L'obiettivo e' descrivere il comportamento atteso del sorgente LaTeX che genera un PDF dimostrativo.
@@ -125,6 +128,7 @@ Ottimizzazioni e miglioramenti prestazionali:
 - **SAMPLE-DES-003**: L'intestazione deve mostrare autore a sinistra, titolo al centro e capitolo corrente a destra, con una linea orizzontale sotto l'intestazione.
 - **SAMPLE-DES-004**: Il documento deve rendere l'indice cliccabile tramite il pacchetto `hyperref`.
 - **SAMPLE-DES-005**: La procedura di compilazione deve eseguire in sequenza unica le due passate di `pdflatex` (prima senza TOC, poi con TOC) riutilizzando i PDF risultanti per l'intera suite di test senza ulteriori ricompilazioni.
+- **SAMPLE-DES-006**: L'indice generato o inserito nel Markdown deve usare l'intestazione esattamente `** PDF TOC **` (senza varianti di formato) per garantire coerenza con il PDF di esempio.
 
 ### 3.2 Funzioni
 - **SAMPLE-REQ-001**: Il documento deve includere i capitoli nell'ordine: "Introduzione Stravagante", "Dati Senza Senso", "Immagini Misteriose", "Figure Vettoriali e Geometria", "Formule Matematiche Casuali", "Flow Chart Casuale", "Conti Matriciali Sconclusionati", "Conclusioni Inutili".
