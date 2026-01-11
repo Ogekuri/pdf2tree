@@ -21,8 +21,12 @@ import json
 import logging
 import mimetypes
 import re
+import subprocess
+import sys
 import unicodedata
 import shutil
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -56,6 +60,8 @@ TEST_GEMINI_EQUATION_DEFAULT = (
     "Test equation annotation generated during automated test execution.\n\n"
     "Representative LaTeX: $$ {formula} $$"
 )
+GITHUB_LATEST_RELEASE_URL = "https://api.github.com/repos/Ogekuri/pdf2tree/releases/latest"
+UPDATE_CHECK_TIMEOUT_SECONDS = 1.0
 PROMPT_EQUATION_DEFAULT = (
     """
 You are annotating an image for Retrieval-Augmented Generation (RAG).
@@ -414,6 +420,109 @@ def program_version() -> str:
     except Exception:
         pkg_version = "unknown"
     return str(pkg_version)
+
+
+def _extract_numeric_version(text: str) -> Optional[str]:
+    """Estrae una versione numerica tipo X.Y.Z da una stringa (es. tag GitHub `v0.0.7`)."""
+
+    if not text:
+        return None
+    match = re.search(r"\d+(?:\.\d+)+", text.strip())
+    if not match:
+        return None
+    return match.group(0)
+
+
+def _version_tuple(version: str) -> Optional[Tuple[int, ...]]:
+    """Converte una stringa versione numerica in tupla di interi per confronto."""
+
+    normalized = _extract_numeric_version(version)
+    if not normalized:
+        return None
+    try:
+        parts = tuple(int(p) for p in normalized.split("."))
+    except Exception:
+        return None
+    return parts
+
+
+def _is_version_greater(candidate: str, current: str) -> bool:
+    """Confronta due versioni numeriche; ritorna True se candidate > current."""
+
+    cand_t = _version_tuple(candidate)
+    curr_t = _version_tuple(current)
+    if not cand_t or not curr_t:
+        return False
+
+    max_len = max(len(cand_t), len(curr_t))
+    cand_padded = cand_t + (0,) * (max_len - len(cand_t))
+    curr_padded = curr_t + (0,) * (max_len - len(curr_t))
+    return cand_padded > curr_padded
+
+
+def _fetch_latest_release_version(*, timeout_seconds: float) -> Optional[str]:
+    """Interroga GitHub Releases per ottenere la versione latest; ritorna None su errore."""
+
+    req = urllib.request.Request(
+        GITHUB_LATEST_RELEASE_URL,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "pdf2tree",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+            raw = resp.read()
+    except Exception:
+        return None
+
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
+
+    tag = payload.get("tag_name") if isinstance(payload, dict) else None
+    if not isinstance(tag, str) or not tag.strip():
+        return None
+
+    return _extract_numeric_version(tag.strip())
+
+
+def maybe_print_new_version_notice(*, program_name: str = "pdf2tree") -> None:
+    """Stampa un avviso se è disponibile una nuova versione; ignora errori e procede."""
+
+    # CORE-DES-086: in modalità test non eseguire richieste di rete.
+    if is_test_mode():
+        return
+
+    current = program_version()
+    if not current or current == "unknown":
+        return
+
+    latest = _fetch_latest_release_version(timeout_seconds=UPDATE_CHECK_TIMEOUT_SECONDS)
+    if not latest:
+        return
+
+    if not _is_version_greater(latest, current):
+        return
+
+    print(
+        f"A new version of {program_name} is available: current {current}, latest {latest}. "
+        f"To upgrade, run: {program_name} --upgrade"
+    )
+
+
+def run_self_upgrade(*, package_name: str = "pdf2tree") -> int:
+    """Esegue l'upgrade del pacchetto tramite pip e ritorna un exit code."""
+
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", package_name]
+    try:
+        result = subprocess.run(cmd)
+    except Exception as exc:
+        print(f"Upgrade failed: {exc}")
+        return 1
+    return int(result.returncode)
 
 
 def print_program_banner(name: str = "pdf2tree") -> None:
@@ -3756,6 +3865,11 @@ def main() -> int:
         action="store_true",
         help="Print the program version and exit",
     )
+    ap.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="Upgrade the installed pdf2tree package and exit",
+    )
     ap.add_argument("--header", type=float, default=0.0, help="Header margin in mm to ignore (default: 0)")
     ap.add_argument("--footer", type=float, default=0.0, help="Footer margin in mm to ignore (default: 0)")
     ap.add_argument(
@@ -3869,6 +3983,9 @@ def main() -> int:
     if args.version:
         print(program_version())
         return 0
+
+    if args.upgrade:
+        return run_self_upgrade(package_name="pdf2tree")
 
     setup_logging(args.verbose, args.debug)
 
@@ -3989,6 +4106,10 @@ def main() -> int:
             return EXIT_OUTPUT_DIR
 
     manifest_path = out_dir / f"{pdf_path.stem}.json"
+
+    # CORE-DES-083: controllo versione dopo validazione e prima di avviare qualsiasi pipeline.
+    # CORE-DES-084: su errore non stampare nulla e proseguire.
+    maybe_print_new_version_notice(program_name="pdf2tree")
 
     if args.post_processing_only:
         if not pdf_path.exists() or not pdf_path.is_file():

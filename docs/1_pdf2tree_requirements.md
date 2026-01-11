@@ -17,7 +17,7 @@ tags: ["markdown", "requirements", "example"]
 ---
 
 # Requisiti pdf2tree
-**Versione**: 0.84
+**Versione**: 0.86
 **Autore**: Codex  
 **Data**: 2026-01-11
 
@@ -112,6 +112,8 @@ tags: ["markdown", "requirements", "example"]
 | 2026-01-07 | 0.82 | La fase di cleanup del Markdown deve degradare le intestazioni non appartenenti alla TOC del PDF prima di rimuovere i marker di pagina |
 | 2026-01-07 | 0.83 | La CLI deve stampare l'help completo quando mancano i parametri obbligatori prima di terminare con errore |
 | 2026-01-11 | 0.84 | Aggiunta opzione CLI --version/--ver per stampare la versione e terminare |
+| 2026-01-11 | 0.85 | Aggiunto controllo disponibilita' nuova versione tramite GitHub releases |
+| 2026-01-11 | 0.86 | Aggiunta opzione CLI --upgrade per aggiornare il pacchetto |
 
 
 ## 1. Introduzione
@@ -280,6 +282,11 @@ Componenti e librerie utilizzati:
 
 - **CORE-DES-081**: Quando gli argomenti obbligatori non sono forniti (inclusa l'esecuzione senza parametri o senza `--from-file`/`--to-dir` salvo uso di `--write-prompts`), la CLI deve stampare l'intero help/usage prima di terminare con il codice di errore per argomenti non validi.
 - **CORE-DES-082**: La CLI deve supportare i flag `--version` e `--ver` che stampano esclusivamente la versione corrente del programma su stdout (solo la stringa versione, più newline) e terminano con codice `0` senza eseguire altre validazioni, senza stampare il banner e senza avviare alcuna pipeline.
+- **CORE-DES-083**: Dopo la validazione dei parametri di input e prima di avviare qualsiasi pipeline, la CLI deve verificare la disponibilità di una nuova versione interrogando l'endpoint `https://api.github.com/repos/Ogekuri/pdf2tree/releases/latest` con timeout di 1 secondo.
+- **CORE-DES-084**: Se la chiamata fallisce o la versione latest non è determinabile dalla risposta JSON, la CLI deve considerare la versione corrente come latest e procedere senza stampare alcun messaggio relativo agli aggiornamenti.
+- **CORE-DES-085**: Se la chiamata ha successo e la versione latest è maggiore della versione corrente, la CLI deve stampare in inglese il messaggio: `A new version of pdf2tree is available: current <current>, latest <latest>. To upgrade, run: pdf2tree --upgrade`.
+- **CORE-DES-086**: In modalità test (`PDF2TREE_TEST_MODE` o `PYTEST_CURRENT_TEST`) la CLI non deve effettuare richieste di rete per il controllo versione.
+- **CORE-DES-087**: La CLI deve supportare il flag `--upgrade` che aggiorna il pacchetto `pdf2tree` nell'ambiente corrente e termina l'esecuzione senza richiedere `--from-file` e `--to-dir`.
 
 - **CORE-DES-077**: La funzione `add_pdf_toc_to_markdown` deve inserire all'inizio del Markdown, subito dopo il marker di start della prima pagina (o all'inizio se assente), una TOC gerarchica basata sul `pdf_toc` con intestazione esattamente `** PDF TOC **` (non sono ammessi formati alternativi) e voci annidate in base al livello, ciascuna con link interno alla sezione corrispondente già presente nel Markdown.
 - **CORE-DES-078**: La CLI deve esporre il flag `--disable-toc` (incluso nel riepilogo parametri) che disabilita l'inserimento della TOC Markdown da parte di `add_pdf_toc_to_markdown`, lasciando inalterate le altre fasi della pipeline di normalizzazione e validazione.
